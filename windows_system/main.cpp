@@ -33,6 +33,7 @@
 #include <list>
 #include <map>
 #include <random>
+#include <span>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -59,15 +60,28 @@ void print_bits ( T const n_ ) noexcept {
         i >>= 1;
     }
 }
+
 template<typename Stream, typename T, typename = std::enable_if_t<std::is_pointer<T>::value>>
 Stream & operator<< ( Stream & out_, T const & n_ ) noexcept {
-    std::uint16_t n[ 4 ];
+    std::int8_t n[ 8 ];
     std::memcpy ( &n, &n_, sizeof ( T ) );
-    out_ << "0x" << std::setfill ( '0' ) << std::setw ( 4 ) << std::hex << ( std::uint32_t ) n[ 0 ];
+    std::swap ( n[ 0 ], n[ 6 ] );
+    std::swap ( n[ 1 ], n[ 7 ] );
+    std::swap ( n[ 2 ], n[ 4 ] );
+    std::swap ( n[ 3 ], n[ 5 ] );
+    out_ << "0x" << std::setfill ( '0' ) << std::setw ( 4 ) << std::hex << std::uppercase
+         << ( std::uint32_t ) ( ( std::uint16_t * ) n )[ 0 ];
     for ( int i = 1; i < 4; ++i )
-        out_ << '\'' << std::setfill ( '0' ) << std::setw ( 4 ) << std::hex << ( std::uint32_t ) n[ i ];
+        out_ << '\'' << std::setw ( 4 ) << ( std::uint32_t ) ( ( std::uint16_t * ) n )[ i ];
+    out_ << std::setfill ( ' ' ) << std::setw ( 0 ) << std::dec << std::nouppercase;
     return out_;
 }
+
+template<typename T>
+constexpr size_t type_page_size ( ) noexcept {
+    return 65'384ull / sizeof ( T );
+}
+constexpr size_t page_size ( ) noexcept { return 65'384ull; }
 
 struct vm_handle {
     using void_p = void *;
@@ -94,7 +108,7 @@ struct windows_system {
 
     // Reserve a 10 MB range of addresses.
     [[nodiscard]] static vm_handle reserve_pages ( size_t n_ ) noexcept {
-        return { ( windows_system::reserved = { VirtualAlloc ( nullptr, n_ * std::numeric_limits<std::uint16_t>::max ( ),
+        return { ( windows_system::reserved = { VirtualAlloc ( nullptr, n_ * ( std::numeric_limits<std::uint16_t>::max ( ) + 1 ),
                                                                MEM_RESERVE, PAGE_NOACCESS ),
                                                 n_ } )
                      .ptr,
@@ -102,19 +116,23 @@ struct windows_system {
     }
 
     static void free_reserved_pages ( ) noexcept {
-        VirtualFree ( windows_system::reserved.ptr, windows_system::reserved.size * std::numeric_limits<std::uint16_t>::max ( ),
-                      MEM_DECOMMIT, PAGE_NOACCESS );
+        VirtualFree ( windows_system::reserved.ptr,
+                      windows_system::reserved.size * ( std::numeric_limits<std::uint16_t>::max ( ) + 1 ), MEM_DECOMMIT,
+                      PAGE_NOACCESS );
         windows_system::reserved = vm_handle{ };
     }
 
     public:
-    [[nodiscard]] static vm_handle commit_page ( vm_handle const & handle_ ) noexcept {
-        return { VirtualAlloc ( handle_.ptr, handle_.size * std::numeric_limits<std::uint16_t>::max ( ), MEM_COMMIT,
-                                PAGE_READWRITE ),
-                 handle_.size };
+    [[nodiscard]] static void_p commit_page ( vm_handle const & handle_ ) noexcept {
+
+        std::cout << "commit page at " << handle_.ptr << " with size " << std::hex << std::uppercase << handle_.size
+                  << std::nouppercase << std::dec << nl;
+
+        return VirtualAlloc ( handle_.ptr, handle_.size, MEM_COMMIT, PAGE_READWRITE );
     }
     static void decommit_page ( vm_handle & handle_ ) noexcept {
-        VirtualFree ( handle_.ptr, handle_.size * std::numeric_limits<std::uint16_t>::max ( ), MEM_DECOMMIT, PAGE_NOACCESS );
+        VirtualFree ( handle_.ptr, handle_.size * ( std::numeric_limits<std::uint16_t>::max ( ) + 1 ), MEM_DECOMMIT,
+                      PAGE_NOACCESS );
     }
 
     // Decommit memory for 3rd page of addresses.
@@ -143,8 +161,6 @@ struct windows_system {
             s = GetProcessHeaps ( 0, NULL );
         return { h, h + s };
     }
-
-    using system = windows_system<unsigned long>;
 
     // Default heap.
     [[nodiscard]] static void_p heap ( ) noexcept { return GetProcessHeap ( ); }
@@ -195,6 +211,8 @@ template<typename SizeType>
 SYSTEM_INFO windows_system<SizeType>::info = get_system_information ( );
 
 using win_system = windows_system<unsigned long>;
+
+#if 0
 
 template<typename Type>
 struct vm_committed_ptr {
@@ -344,22 +362,34 @@ struct virtual_vector {
     }
 
     [[nodiscard]] static constexpr size_type capacity ( ) noexcept {
-        return Capacity * ( std::numeric_limits<std::uint16_t>::max ( ) / sizeof ( value_type ) );
+        return Capacity * ( ( std::numeric_limits<std::uint16_t>::max ( ) + 1 ) / sizeof ( value_type ) );
     }
     [[nodiscard]] static constexpr size_type max_size ( ) noexcept { return capacity ( ); }
 
     [[nodiscard]] size_type size ( ) const noexcept { return m_end - reinterpret_cast<pointer> ( m_begin.ptr ); }
 
+    [[nodiscard]] size_type committed ( ) const noexcept {
+        return m_begin.size * ( ( std::numeric_limits<std::uint16_t>::max ( ) + 1 ) / sizeof ( value_type ) );
+    }
+
     template<typename... Args>
     reference emplace_back ( Args &&... value_ ) noexcept {
         if ( m_begin.ptr ) {
+            if ( size ( ) == committed ( ) ) {
+                std::cout << "inc" << ' ';
+                win_system::commit_page ( vm_handle{ m_end, m_begin.size } ).ptr;
+                m_begin.size <<= 1;
+            }
         }
         else {
-            m_begin = win_system::commit_page ( m_begin );
-            new ( m_begin.ptr ) value_type{ std::forward<Args> ( value_ )... };
+            std::cout << "init" << nl;
+            m_begin.size = 1;
+            m_begin.ptr  = win_system::commit_page ( m_begin ).ptr;
+            m_end        = reinterpret_cast<pointer> ( m_begin.ptr );
         }
+        return *new ( m_end++ ) value_type{ std::forward<Args> ( value_ )... };
     }
-    /*
+
     template<typename Pair>
     struct map_comaparator {
         bool operator( ) ( Pair const & a, Pair const & b ) const noexcept { return a.first < b.first; }
@@ -388,7 +418,7 @@ struct virtual_vector {
                 return std::addressof ( kv );
         return end ( );
     }
-    */
+
     [[nodiscard]] const_pointer data ( ) const noexcept { return reinterpret_cast<pointer> ( m_begin.ptr ); }
     [[nodiscard]] pointer data ( ) noexcept { return const_cast<pointer> ( std::as_const ( *this ).data ( ) ); }
 
@@ -433,6 +463,8 @@ struct virtual_vector {
     pointer m_end = nullptr;
 };
 
+#endif
+
 void handleEptr ( std::exception_ptr eptr ) { // Passing by value is ok.
     try {
         if ( eptr )
@@ -448,7 +480,40 @@ int main ( ) {
     std::exception_ptr eptr;
 
     try {
-        virtual_vector<int, 1'000'000'000'000> v;
+
+        void * r1 = win_system::commit_page ( vm_handle{ win_system::reserve_pages ( 1'000'000 ).ptr, 1 * page_size ( ) } );
+
+        void * r2 = win_system::commit_page (
+            vm_handle{ reinterpret_cast<int *> ( r1 ) + 1 * type_page_size<int> ( ), 1 * page_size ( ) } );
+
+        void * r3 = win_system::commit_page (
+            vm_handle{ reinterpret_cast<int *> ( r1 ) + 2 * type_page_size<int> ( ), 2 * page_size ( ) } );
+
+        std::span<int> vv{ reinterpret_cast<int *> ( r1 ), 4 * type_page_size<int> ( ) };
+
+        int i = 0;
+        for ( auto & v : vv )
+            new ( std::addressof ( v ) ) int{ i++ };
+
+        /*
+        virtual_vector<int, 1'000'000'000'000> vv;
+
+        for ( int i = 0; i < 16'384; ++i )
+            vv.emplace_back ( i );
+
+        std::cout << vv.size ( ) << " " << vv.committed ( ) << nl;
+
+        for ( auto & v : vv )
+            std::cout << v << ' ';
+        std::cout << nl;
+
+        vv.emplace_back ( 16'384 );
+
+        std::cout << vv.size ( ) << " " << vv.committed ( ) << nl;
+        */
+        for ( auto & v : vv )
+            std::cout << v << ' ';
+        std::cout << nl;
     }
     catch ( ... ) {
         eptr = std::current_exception ( ); // Capture.
