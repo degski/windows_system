@@ -77,12 +77,12 @@ Stream & operator<< ( Stream & out_, T const & n_ ) noexcept {
     return out_;
 }
 
-template<typename T>
-constexpr size_t type_page_size ( ) noexcept {
-    return 65'384ull / sizeof ( T );
-}
 constexpr size_t page_size ( ) noexcept { return 65'384ull; }
 
+template<typename T>
+constexpr size_t type_page_size ( ) noexcept {
+    return page_size ( ) / sizeof ( T );
+}
 struct vm_handle {
     using void_p = void *;
     void_p ptr   = nullptr;
@@ -107,18 +107,13 @@ struct windows_system {
     }
 
     // Reserve a 10 MB range of addresses.
-    [[nodiscard]] static vm_handle reserve_pages ( size_t n_ ) noexcept {
-        return { ( windows_system::reserved = { VirtualAlloc ( nullptr, n_ * ( std::numeric_limits<std::uint16_t>::max ( ) + 1 ),
-                                                               MEM_RESERVE, PAGE_NOACCESS ),
-                                                n_ } )
-                     .ptr,
-                 size_t{ 0 } };
+    static void_p reserve_pages ( size_t n_ ) noexcept {
+        windows_system::reserved = { VirtualAlloc ( nullptr, n_ * page_size ( ), MEM_RESERVE, PAGE_NOACCESS ), n_ };
+        return reserved.ptr;
     }
 
     static void free_reserved_pages ( ) noexcept {
-        VirtualFree ( windows_system::reserved.ptr,
-                      windows_system::reserved.size * ( std::numeric_limits<std::uint16_t>::max ( ) + 1 ), MEM_DECOMMIT,
-                      PAGE_NOACCESS );
+        VirtualFree ( windows_system::reserved.ptr, windows_system::reserved.size * page_size ( ), MEM_DECOMMIT, PAGE_NOACCESS );
         windows_system::reserved = vm_handle{ };
     }
 
@@ -130,10 +125,7 @@ struct windows_system {
 
         return VirtualAlloc ( ptr_, size_, MEM_COMMIT, PAGE_READWRITE );
     }
-    static void decommit_page ( vm_handle & handle_ ) noexcept {
-        VirtualFree ( handle_.ptr, handle_.size * ( std::numeric_limits<std::uint16_t>::max ( ) + 1 ), MEM_DECOMMIT,
-                      PAGE_NOACCESS );
-    }
+    static void decommit_page ( void_p ptr_, size_t size_ ) noexcept { VirtualFree ( ptr_, size_, MEM_DECOMMIT, PAGE_NOACCESS ); }
 
     // Decommit memory for 3rd page of addresses.
 
@@ -351,7 +343,7 @@ struct virtual_vector {
 
     virtual_vector ( ) :
         m_begin ( reinterpret_cast<pointer> ( win_system::reserve_pages ( Capacity ) ) ), m_end ( m_begin ),
-        m_next_size ( type_page_size<int> ( ) ) {}
+        m_next_size ( page_size ( ) ) {}
 
     ~virtual_vector ( ) {}
 
@@ -366,13 +358,12 @@ struct virtual_vector {
     [[nodiscard]] static constexpr size_type capacity ( ) noexcept {
         return Capacity * ( ( std::numeric_limits<std::uint16_t>::max ( ) + 1 ) / sizeof ( value_type ) );
     }
-    [[nodiscard]] static constexpr size_type max_size ( ) noexcept { return capacity ( ); }
-
-    [[nodiscard]] size_type size ( ) const noexcept { return m_end - reinterpret_cast<pointer> ( m_begin ); }
-
     [[nodiscard]] size_type committed ( ) const noexcept {
         return m_next_size * ( ( std::numeric_limits<std::uint16_t>::max ( ) + 1 ) / sizeof ( value_type ) );
     }
+    [[nodiscard]] size_type size ( ) const noexcept { return m_end - reinterpret_cast<pointer> ( m_begin ); }
+
+    [[nodiscard]] static constexpr size_type max_size ( ) noexcept { return capacity ( ); }
 
     template<typename... Args>
     reference emplace_back ( Args &&... value_ ) noexcept {
@@ -481,7 +472,7 @@ int main ( ) {
 
     try {
 
-        void * r1 = win_system::commit_page ( win_system::reserve_pages ( 1'000'000 ).ptr, 1 * page_size ( ) );
+        void * r1 = win_system::commit_page ( win_system::reserve_pages ( 1'000'000 ), 1 * page_size ( ) );
 
         void * r2 = win_system::commit_page ( reinterpret_cast<int *> ( r1 ) + 1 * type_page_size<int> ( ), 1 * page_size ( ) );
 
