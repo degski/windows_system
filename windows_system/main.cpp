@@ -123,12 +123,12 @@ struct windows_system {
     }
 
     public:
-    [[nodiscard]] static void_p commit_page ( vm_handle const & handle_ ) noexcept {
+    [[nodiscard]] static void_p commit_page ( void_p ptr_, size_t size_ ) noexcept {
 
-        std::cout << "commit page at " << handle_.ptr << " with size " << std::hex << std::uppercase << handle_.size
-                  << std::nouppercase << std::dec << nl;
+        std::cout << "commit page at " << ptr_ << " with size " << std::hex << std::uppercase << size_ << std::nouppercase
+                  << std::dec << nl;
 
-        return VirtualAlloc ( handle_.ptr, handle_.size, MEM_COMMIT, PAGE_READWRITE );
+        return VirtualAlloc ( ptr_, size_, MEM_COMMIT, PAGE_READWRITE );
     }
     static void decommit_page ( vm_handle & handle_ ) noexcept {
         VirtualFree ( handle_.ptr, handle_.size * ( std::numeric_limits<std::uint16_t>::max ( ) + 1 ), MEM_DECOMMIT,
@@ -327,7 +327,7 @@ struct vm_committed_ptr {
         return ( int ) ( ( ( std::uintptr_t ) ptr_ ) & ( ( std::uintptr_t ) ( -( ( std::intptr_t ) ptr_ ) ) ) );
     }
 };
-
+#endif
 template<typename Value, size_t Capacity>
 struct virtual_vector {
 
@@ -349,7 +349,9 @@ struct virtual_vector {
     using reverse_iterator       = pointer;
     using const_reverse_iterator = const_pointer;
 
-    virtual_vector ( ) : m_begin ( win_system::reserve_pages ( Capacity ) ), m_end ( reinterpret_cast<pointer> ( m_begin.ptr ) ) {}
+    virtual_vector ( ) :
+        m_begin ( reinterpret_cast<pointer> ( win_system::reserve_pages ( Capacity ) ) ), m_end ( m_begin ),
+        m_next_size ( type_page_size<int> ( ) ) {}
 
     ~virtual_vector ( ) {}
 
@@ -358,7 +360,7 @@ struct virtual_vector {
             for ( auto & v : *this )
                 v.~value_type ( );
         }
-        m_end = reinterpret_cast<pointer> ( m_begin.ptr );
+        m_end = m_begin;
     }
 
     [[nodiscard]] static constexpr size_type capacity ( ) noexcept {
@@ -366,30 +368,29 @@ struct virtual_vector {
     }
     [[nodiscard]] static constexpr size_type max_size ( ) noexcept { return capacity ( ); }
 
-    [[nodiscard]] size_type size ( ) const noexcept { return m_end - reinterpret_cast<pointer> ( m_begin.ptr ); }
+    [[nodiscard]] size_type size ( ) const noexcept { return m_end - reinterpret_cast<pointer> ( m_begin ); }
 
     [[nodiscard]] size_type committed ( ) const noexcept {
-        return m_begin.size * ( ( std::numeric_limits<std::uint16_t>::max ( ) + 1 ) / sizeof ( value_type ) );
+        return m_next_size * ( ( std::numeric_limits<std::uint16_t>::max ( ) + 1 ) / sizeof ( value_type ) );
     }
 
     template<typename... Args>
     reference emplace_back ( Args &&... value_ ) noexcept {
-        if ( m_begin.ptr ) {
+        if ( m_begin ) {
             if ( size ( ) == committed ( ) ) {
                 std::cout << "inc" << ' ';
-                win_system::commit_page ( vm_handle{ m_end, m_begin.size } ).ptr;
-                m_begin.size <<= 1;
+                win_system::commit_page ( m_end, m_next_size );
+                m_next_size <<= 1;
             }
         }
         else {
             std::cout << "init" << nl;
-            m_begin.size = 1;
-            m_begin.ptr  = win_system::commit_page ( m_begin ).ptr;
-            m_end        = reinterpret_cast<pointer> ( m_begin.ptr );
+            m_begin = win_system::commit_page ( m_begin, m_next_size );
+            m_end   = reinterpret_cast<pointer> ( m_begin );
         }
         return *new ( m_end++ ) value_type{ std::forward<Args> ( value_ )... };
     }
-
+    /*
     template<typename Pair>
     struct map_comaparator {
         bool operator( ) ( Pair const & a, Pair const & b ) const noexcept { return a.first < b.first; }
@@ -418,13 +419,13 @@ struct virtual_vector {
                 return std::addressof ( kv );
         return end ( );
     }
-
-    [[nodiscard]] const_pointer data ( ) const noexcept { return reinterpret_cast<pointer> ( m_begin.ptr ); }
+    */
+    [[nodiscard]] const_pointer data ( ) const noexcept { return reinterpret_cast<pointer> ( m_begin ); }
     [[nodiscard]] pointer data ( ) noexcept { return const_cast<pointer> ( std::as_const ( *this ).data ( ) ); }
 
     // Iterators.
 
-    [[nodiscard]] const_iterator begin ( ) const noexcept { return reinterpret_cast<pointer> ( m_begin.ptr ); }
+    [[nodiscard]] const_iterator begin ( ) const noexcept { return reinterpret_cast<pointer> ( m_begin ); }
     [[nodiscard]] const_iterator cbegin ( ) const noexcept { return begin ( ); }
     [[nodiscard]] iterator begin ( ) noexcept { return const_cast<iterator> ( std::as_const ( *this ).begin ( ) ); }
 
@@ -436,7 +437,7 @@ struct virtual_vector {
     [[nodiscard]] const_iterator crbegin ( ) const noexcept { return rbegin ( ); }
     [[nodiscard]] iterator rbegin ( ) noexcept { return const_cast<iterator> ( std::as_const ( *this ).rbegin ( ) ); }
 
-    [[nodiscard]] const_iterator rend ( ) const noexcept { return reinterpret_cast<pointer> ( m_begin.ptr ) - 1; }
+    [[nodiscard]] const_iterator rend ( ) const noexcept { return reinterpret_cast<pointer> ( m_begin ) - 1; }
     [[nodiscard]] const_iterator crend ( ) const noexcept { return rend ( ); }
     [[nodiscard]] iterator rend ( ) noexcept { return const_cast<iterator> ( std::as_const ( *this ).rend ( ) ); }
 
@@ -448,22 +449,21 @@ struct virtual_vector {
 
     [[nodiscard]] const_reference at ( size_type const i_ ) const {
         if ( 0 <= i_ and i_ < size ( ) )
-            return m_begin.ptr[ i_ ];
+            return m_begin[ i_ ];
         else
             throw std::runtime_error ( "virtual_vector: index out of bounds" );
     }
     [[nodiscard]] reference at ( size_type const i_ ) { return const_cast<reference> ( std::as_const ( *this ).at ( i_ ) ); }
 
-    [[nodiscard]] const_reference operator[] ( size_type const i_ ) const noexcept { return m_begin.ptr[ i_ ]; }
+    [[nodiscard]] const_reference operator[] ( size_type const i_ ) const noexcept { return m_begin[ i_ ]; }
     [[nodiscard]] reference operator[] ( size_type const i_ ) noexcept {
         return const_cast<reference> ( std::as_const ( *this ).operator[] ( i_ ) );
     }
 
-    vm_handle m_begin; // Initialed with valid ptr to reserved memory and size = 0 (the number of committed pages).
-    pointer m_end = nullptr;
+    // Initialed with valid ptr to reserved memory and size = 0 (the number of committed pages).
+    pointer m_begin = nullptr, m_end = nullptr;
+    std::size_t m_next_size;
 };
-
-#endif
 
 void handleEptr ( std::exception_ptr eptr ) { // Passing by value is ok.
     try {
@@ -481,13 +481,11 @@ int main ( ) {
 
     try {
 
-        void * r1 = win_system::commit_page ( vm_handle{ win_system::reserve_pages ( 1'000'000 ).ptr, 1 * page_size ( ) } );
+        void * r1 = win_system::commit_page ( win_system::reserve_pages ( 1'000'000 ).ptr, 1 * page_size ( ) );
 
-        void * r2 = win_system::commit_page (
-            vm_handle{ reinterpret_cast<int *> ( r1 ) + 1 * type_page_size<int> ( ), 1 * page_size ( ) } );
+        void * r2 = win_system::commit_page ( reinterpret_cast<int *> ( r1 ) + 1 * type_page_size<int> ( ), 1 * page_size ( ) );
 
-        void * r3 = win_system::commit_page (
-            vm_handle{ reinterpret_cast<int *> ( r1 ) + 2 * type_page_size<int> ( ), 2 * page_size ( ) } );
+        void * r3 = win_system::commit_page ( reinterpret_cast<int *> ( r1 ) + 2 * type_page_size<int> ( ), 2 * page_size ( ) );
 
         std::span<int> vv{ reinterpret_cast<int *> ( r1 ), 4 * type_page_size<int> ( ) };
 
