@@ -198,18 +198,15 @@ struct vm_committed_ptr {
 
     explicit vm_committed_ptr ( vm_committed_ptr const & ) noexcept = delete;
 
-    vm_committed_ptr ( vm_committed_ptr && moving_ ) noexcept { moving_.swap ( *this ); }
+    vm_committed_ptr ( vm_committed_ptr && moving_ ) noexcept { std::swap ( moving_, *this ); }
 
     template<typename U>
     explicit vm_committed_ptr ( vm_committed_ptr<U> && moving_ ) noexcept {
-        vm_committed_ptr<value_type> tmp ( vm_handle{ moving_.release ( ), 0ull } );
+        vm_committed_ptr<value_type> tmp ( moving_.release ( ) );
         std::swap ( tmp, *this );
     }
 
-    vm_committed_ptr ( vm_handle && h_ ) noexcept : handle ( std::move ( h_ ) ) {
-        if ( handle.ptr )
-            win_system::commit_page ( handle );
-    }
+    vm_committed_ptr ( vm_handle && h_ ) noexcept : handle ( h_.ptr ? win_system::commit_page ( h_ ) : vm_handle{ } ) {}
 
     // Destruct.
 
@@ -229,13 +226,13 @@ struct vm_committed_ptr {
 
     template<typename U>
     [[maybe_unused]] vm_committed_ptr & operator= ( vm_committed_ptr<U> && moving_ ) noexcept {
-        vm_committed_ptr<value_type> tmp ( vm_handle{ moving_.release ( ), 0ull } );
+        vm_committed_ptr<value_type> tmp ( moving_.release ( ) );
         std::swap ( tmp, *this );
         return *this;
     }
 
     [[maybe_unused]] vm_committed_ptr & operator= ( vm_handle && moving_ ) noexcept {
-        handle = std::move ( moving_ );
+        handle = moving_;
         if ( handle.ptr )
             win_system::commit_page ( handle );
         return *this;
