@@ -41,6 +41,13 @@
 // extern unsigned long __declspec( dllimport ) __stdcall GetProcessHeaps ( unsigned long NumberOfHeaps, void ** ProcessHeaps );
 // extern __declspec( dllimport ) void * __stdcall GetProcessHeap ( );
 
+// -fsanitize=address
+/*
+C:\Program Files\LLVM\lib\clang\10.0.0\lib\windows\clang_rt.asan_cxx-x86_64.lib;
+C:\Program Files\LLVM\lib\clang\10.0.0\lib\windows\clang_rt.asan-preinit-x86_64.lib;
+C:\Program Files\LLVM\lib\clang\10.0.0\lib\windows\clang_rt.asan-x86_64.lib
+*/
+
 template<typename T, typename = std::enable_if_t<std::is_integral<T>::value>>
 void print_bits ( T const n_ ) noexcept {
     using Tu = typename std::make_unsigned<T>::type;
@@ -80,23 +87,34 @@ struct windows_system {
 
     ~windows_system ( ) noexcept {
         if ( reserved.ptr ) {
-            VirtualFree ( reserved.ptr, reserved.size, MEM_RELEASE );
-            reserved = vm_handle{ };
+            VirtualFree ( windows_system::reserved.ptr, windows_system::reserved.size, MEM_RELEASE );
+            windows_system::reserved = vm_handle{ };
         }
     }
 
-    private:
     // Reserve a 10 MB range of addresses.
-    [[nodiscard]] static vm_handle reserve_pages ( size_t n_ ) {
-        return { VirtualAlloc ( NULL, n_ * 65'535ull, MEM_RESERVE, PAGE_NOACCESS ), n_ };
+    [[nodiscard]] static vm_handle reserve_pages ( size_t n_ ) noexcept {
+        return { ( windows_system::reserved = { VirtualAlloc ( nullptr, n_ * std::numeric_limits<std::uint16_t>::max ( ),
+                                                               MEM_RESERVE, PAGE_NOACCESS ),
+                                                n_ } )
+                     .ptr,
+                 size_t{ 0 } };
+    }
+
+    static void free_reserved_pages ( ) noexcept {
+        VirtualFree ( windows_system::reserved.ptr, windows_system::reserved.size * std::numeric_limits<std::uint16_t>::max ( ),
+                      MEM_DECOMMIT, PAGE_NOACCESS );
+        windows_system::reserved = vm_handle{ };
     }
 
     public:
-    [[nodiscard]] static vm_handle commit_page ( vm_handle const & handle_ ) {
-        return { VirtualAlloc ( handle_.ptr, handle_.size * 65'535ull, MEM_COMMIT, PAGE_READWRITE ), handle_.size };
+    [[nodiscard]] static vm_handle commit_page ( vm_handle const & handle_ ) noexcept {
+        return { VirtualAlloc ( handle_.ptr, handle_.size * std::numeric_limits<std::uint16_t>::max ( ), MEM_COMMIT,
+                                PAGE_READWRITE ),
+                 handle_.size };
     }
-    [[nodiscard]] static void decommit_page ( vm_handle & handle_ ) {
-        VirtualFree ( handle_.ptr, handle_.size * 65'535ull, MEM_DECOMMIT, PAGE_NOACCESS );
+    static void decommit_page ( vm_handle & handle_ ) noexcept {
+        VirtualFree ( handle_.ptr, handle_.size * std::numeric_limits<std::uint16_t>::max ( ), MEM_DECOMMIT, PAGE_NOACCESS );
     }
 
     // Decommit memory for 3rd page of addresses.
@@ -140,6 +158,7 @@ struct windows_system {
     static SYSTEM_INFO info;
 
     static SYSTEM_INFO get_system_information ( ) noexcept {
+        assert ( virtual_page_size ( ) == std::numeric_limits<std::uint16_t>::max ( ) );
         SYSTEM_INFO si;
         GetSystemInfo ( &si );
         return si;
@@ -170,10 +189,10 @@ struct windows_system {
 };
 
 template<typename SizeType>
-SYSTEM_INFO windows_system<SizeType>::info = get_system_information ( );
+vm_handle windows_system<SizeType>::reserved;
 
 template<typename SizeType>
-vm_handle windows_system<SizeType>::reserved;
+SYSTEM_INFO windows_system<SizeType>::info = get_system_information ( );
 
 using win_system = windows_system<unsigned long>;
 
@@ -262,7 +281,7 @@ struct vm_committed_ptr {
         return tmp;
     }
 
-    public
+    public:
     void reset ( ) noexcept {
         vm_committed_ptr tmp = release ( );
         win_system::decommit_page ( tmp );
@@ -274,7 +293,7 @@ struct vm_committed_ptr {
     }
     template<typename U>
     void reset ( vm_committed_ptr<U> && moving_ ) noexcept {
-        vm_committed_ptr<T> tmp ( std::move ( moving_ ) );
+        vm_committed_ptr<value_type> tmp ( std::move ( moving_ ) );
         std::swap ( tmp, *this );
         win_system::decommit_page ( tmp );
     }
@@ -291,4 +310,150 @@ struct vm_committed_ptr {
     }
 };
 
-int main ( ) { return EXIT_SUCCESS; }
+template<typename Value, size_t Capacity>
+struct virtual_vector {
+
+    public:
+    using value_type = Value;
+
+    using pointer       = value_type *;
+    using const_pointer = value_type const *;
+
+    using reference       = value_type &;
+    using const_reference = value_type const &;
+    using rv_reference    = value_type &&;
+
+    using size_type       = std::size_t;
+    using difference_type = std::make_signed<size_type>;
+
+    using iterator               = pointer;
+    using const_iterator         = const_pointer;
+    using reverse_iterator       = pointer;
+    using const_reverse_iterator = const_pointer;
+
+    virtual_vector ( ) : m_begin ( win_system::reserve_pages ( Capacity ) ), m_end ( reinterpret_cast<pointer> ( m_begin.ptr ) ) {}
+
+    ~virtual_vector ( ) {}
+
+    void clear ( ) noexcept {
+        if constexpr ( not std::is_scalar<Value>::value ) {
+            for ( auto & v : *this )
+                v.~value_type ( );
+        }
+        m_end = reinterpret_cast<pointer> ( m_begin.ptr );
+    }
+
+    [[nodiscard]] static constexpr size_type capacity ( ) noexcept {
+        return Capacity * ( std::numeric_limits<std::uint16_t>::max ( ) / sizeof ( value_type ) );
+    }
+    [[nodiscard]] static constexpr size_type max_size ( ) noexcept { return capacity ( ); }
+
+    [[nodiscard]] size_type size ( ) const noexcept { return m_end - reinterpret_cast<pointer> ( m_begin.ptr ); }
+
+    template<typename... Args>
+    reference emplace_back ( Args &&... value_ ) noexcept {
+        if ( m_begin.ptr ) {
+        }
+        else {
+            m_begin = win_system::commit_page ( m_begin );
+            new ( m_begin.ptr ) value_type{ std::forward<Args> ( value_ )... };
+        }
+    }
+    /*
+    template<typename Pair>
+    struct map_comaparator {
+        bool operator( ) ( Pair const & a, Pair const & b ) const noexcept { return a.first < b.first; }
+    };
+
+    iterator binary_find ( key_type const & key_ ) const noexcept {
+        auto first = std::lower_bound ( begin ( ), end ( ), key_, map_comaparator<key_value_type> ( ) );
+        return first != end ( ) and not map_comaparator<key_value_type> ( key_, *first ) ? first : end ( );
+    }
+
+    iterator linear_lowerbound ( key_type const & key ) const noexcept {
+        for ( key_value_type const & kv : *this )
+            if ( kv.first >= key )
+                return std::addressof ( kv );
+        return end ( );
+    };
+
+    iterator linear_find ( key_type const & key_ ) const noexcept {
+        auto first = linear_lowerbound ( key_ );
+        return first != end ( ) and key_ == *first ? first : end ( );
+    }
+
+    iterator find ( value_type const & val_ ) const noexcept {
+        for ( key_value_type const & kv : *this )
+            if ( kv.second == val_ )
+                return std::addressof ( kv );
+        return end ( );
+    }
+    */
+    [[nodiscard]] const_pointer data ( ) const noexcept { return reinterpret_cast<pointer> ( m_begin.ptr ); }
+    [[nodiscard]] pointer data ( ) noexcept { return const_cast<pointer> ( std::as_const ( *this ).data ( ) ); }
+
+    // Iterators.
+
+    [[nodiscard]] const_iterator begin ( ) const noexcept { return reinterpret_cast<pointer> ( m_begin.ptr ); }
+    [[nodiscard]] const_iterator cbegin ( ) const noexcept { return begin ( ); }
+    [[nodiscard]] iterator begin ( ) noexcept { return const_cast<iterator> ( std::as_const ( *this ).begin ( ) ); }
+
+    [[nodiscard]] const_iterator end ( ) const noexcept { return m_end; }
+    [[nodiscard]] const_iterator cend ( ) const noexcept { return end ( ); }
+    [[nodiscard]] iterator end ( ) noexcept { return const_cast<iterator> ( std::as_const ( *this ).end ( ) ); }
+
+    [[nodiscard]] const_iterator rbegin ( ) const noexcept { return m_end - 1; }
+    [[nodiscard]] const_iterator crbegin ( ) const noexcept { return rbegin ( ); }
+    [[nodiscard]] iterator rbegin ( ) noexcept { return const_cast<iterator> ( std::as_const ( *this ).rbegin ( ) ); }
+
+    [[nodiscard]] const_iterator rend ( ) const noexcept { return reinterpret_cast<pointer> ( m_begin.ptr ) - 1; }
+    [[nodiscard]] const_iterator crend ( ) const noexcept { return rend ( ); }
+    [[nodiscard]] iterator rend ( ) noexcept { return const_cast<iterator> ( std::as_const ( *this ).rend ( ) ); }
+
+    [[nodiscard]] const_reference front ( ) const noexcept { return *begin ( ); }
+    [[nodiscard]] reference front ( ) noexcept { return const_cast<reference> ( std::as_const ( *this ).front ( ) ); }
+
+    [[nodiscard]] const_reference back ( ) const noexcept { return *rbegin ( ); }
+    [[nodiscard]] reference back ( ) noexcept { return const_cast<reference> ( std::as_const ( *this ).back ( ) ); }
+
+    [[nodiscard]] const_reference at ( size_type const i_ ) const {
+        if ( 0 <= i_ and i_ < size ( ) )
+            return m_begin.ptr[ i_ ];
+        else
+            throw std::runtime_error ( "virtual_vector: index out of bounds" );
+    }
+    [[nodiscard]] reference at ( size_type const i_ ) { return const_cast<reference> ( std::as_const ( *this ).at ( i_ ) ); }
+
+    [[nodiscard]] const_reference operator[] ( size_type const i_ ) const noexcept { return m_begin.ptr[ i_ ]; }
+    [[nodiscard]] reference operator[] ( size_type const i_ ) noexcept {
+        return const_cast<reference> ( std::as_const ( *this ).operator[] ( i_ ) );
+    }
+
+    vm_handle m_begin; // Initialed with valid ptr to reserved memory and size = 0 (the number of committed pages).
+    pointer m_end = nullptr;
+};
+
+void handleEptr ( std::exception_ptr eptr ) { // Passing by value is ok.
+    try {
+        if ( eptr )
+            std::rethrow_exception ( eptr );
+    }
+    catch ( std::exception const & e ) {
+        std::cout << "Caught exception \"" << e.what ( ) << "\"\n";
+    }
+}
+
+int main ( ) {
+
+    std::exception_ptr eptr;
+
+    try {
+        virtual_vector<int, 1'000'000'000'000> v;
+    }
+    catch ( ... ) {
+        eptr = std::current_exception ( ); // Capture.
+    }
+    handleEptr ( eptr );
+
+    return EXIT_SUCCESS;
+}
