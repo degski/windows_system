@@ -571,7 +571,8 @@ void handleEptr ( std::exception_ptr eptr ) { // Passing by value is ok.
 #include <immintrin.h>
 
 namespace sax {
-
+// dst and src must be 32-byte aligned.
+// size must be multiple of 32*2 = 64 bytes.
 inline void memcpy_avx ( void * dst, void const * src, size_t size ) noexcept {
     // https://hero.handmade.network/forums/code-discussion/t/157-memory_bandwidth_+_implementing_memcpy
     constexpr size_t stride = 2 * sizeof ( __m256i );
@@ -585,7 +586,8 @@ inline void memcpy_avx ( void * dst, void const * src, size_t size ) noexcept {
         dst = reinterpret_cast<uint8_t *> ( dst ) + stride;
     }
 }
-
+// dst and src must be 16-byte aligned
+// size must be multiple of 16*2 = 32 bytes
 inline void memcpy_sse ( void * dst, void const * src, size_t size ) noexcept {
     size_t stride = 2 * sizeof ( __m128 );
     while ( size ) {
@@ -599,6 +601,10 @@ inline void memcpy_sse ( void * dst, void const * src, size_t size ) noexcept {
     }
 }
 
+// Pointer alignment.
+[[nodiscard]] static inline int pointer_alignment ( void * ptr_ ) noexcept {
+    return ( int ) ( ( std::uintptr_t ) ptr_ & ( std::uintptr_t ) - ( ( std::intptr_t ) ptr_ ) );
+}
 } // namespace sax
 
 #include <plf/plf_nanotimer.h>
