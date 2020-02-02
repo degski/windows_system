@@ -387,7 +387,7 @@ struct virtual_vector {
     }
     template<typename... Args>
     reference push_back ( Args &&... value_ ) noexcept {
-        emplace_back ( value_type{ std::forward<Args> ( value_ )... } );
+        return emplace_back ( value_type{ std::forward<Args> ( value_ )... } );
     }
 
     // TODO vectorized std::copy.
