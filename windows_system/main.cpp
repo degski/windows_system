@@ -418,25 +418,14 @@ struct virtual_vector {
     }
 
     // Tear down committed.
-    void tear_down_committed_ ( size_type const to_commit_size_in_bytes_ = 0u ) noexcept {
-        size_type cib      = GrowthPolicy::shrink ( m_committed_in_bytes );
-        pointer rbegin     = reinterpret_cast<pointer> ( reinterpret_cast<char *> ( m_begin ) - cib );
-        pointer const rend = reinterpret_cast<pointer> ( reinterpret_cast<char *> ( m_begin ) + to_commit_size_in_bytes_ );
-        for ( ; rbegin == rend; cib = GrowthPolicy::shrink ( cib ), rbegin -= cib )
-            sys::decommit_page ( rbegin, cib );
-        assert ( rbegin == m_begin );
+    void tear_down_committed ( size_type const to_commit_size_in_bytes_ = 0u ) noexcept {
+        size_type committed          = GrowthPolicy::shrink ( committed );
+        pointer rbegin               = m_begin + committed;
+        size_type const to_committed = std::max ( page_size_in_bytes ( ), to_commit_size_in_bytes_ );
+        for ( ; to_committed == committed; committed = GrowthPolicy::shrink ( committed ), rbegin -= committed )
+            sys::decommit_page ( rbegin, committed );
         if ( not to_commit_size_in_bytes_ )
-            sys::decommit_page ( m_begin, cib );
-    }
-
-    // Tear down committed.
-    void tear_down_committed ( ) noexcept {
-        size_type committed = page_size_in_bytes ( );
-        pointer end         = m_begin;
-        sys::decommit_page ( end, committed );
-        end += committed;
-        for ( ; end == m_end; committed = GrowthPolicy::grow ( committed ), end += committed )
-            sys::decommit_page ( end, committed );
+            sys::decommit_page ( m_begin, page_size_in_bytes ( ) );
     }
 
     void clear_impl ( ) noexcept {
@@ -579,11 +568,86 @@ void handleEptr ( std::exception_ptr eptr ) { // Passing by value is ok.
     }
 }
 
+#include <immintrin.h>
+
+namespace sax {
+
+inline void memcpy_avx ( void * dst, void const * src, size_t size ) noexcept {
+    // https://hero.handmade.network/forums/code-discussion/t/157-memory_bandwidth_+_implementing_memcpy
+    constexpr size_t stride = 2 * sizeof ( __m256i );
+    while ( size ) {
+        __m256i a = _mm256_load_si256 ( ( __m256i * ) src + 0 );
+        __m256i b = _mm256_load_si256 ( ( __m256i * ) src + 1 );
+        _mm256_stream_si256 ( ( __m256i * ) dst + 0, a );
+        _mm256_stream_si256 ( ( __m256i * ) dst + 1, b );
+        size -= stride;
+        src = reinterpret_cast<uint8_t const *> ( src ) + stride;
+        dst = reinterpret_cast<uint8_t *> ( dst ) + stride;
+    }
+}
+
+} // namespace sax
+
+#include <plf/plf_nanotimer.h>
+
+#if 1
+#    define mc sax::memcpy_avx
+
+#else
+#    define mc std::memcpy
+#endif
 int main ( ) {
 
     std::exception_ptr eptr;
 
     try {
+
+        constexpr size_t size = 65536 * 2048;
+
+        char * a = reinterpret_cast<char *> ( _aligned_malloc ( size, 32 ) );
+        char * b = reinterpret_cast<char *> ( _aligned_malloc ( size, 32 ) );
+
+        for ( int i = 0; i < size; ++i ) {
+            a[ i ] = 123;
+            b[ i ] = 0;
+        }
+
+        plf::nanotimer t;
+
+        t.start ( );
+        mc ( b, a, size );
+        auto r = t.get_elapsed_ms ( );
+
+        std::cout << ( size_t ) r << " ms " << ( int ) b[ 1024 * 1024 - 1 ] << nl;
+
+        for ( int i = 0; i < size; ++i )
+            b[ i ] = 0;
+
+        t.start ( );
+        mc ( b, a, size );
+        r = t.get_elapsed_ms ( );
+
+        std::cout << ( size_t ) r << " ms " << ( int ) b[ 1024 * 1024 - 1 ] << nl;
+
+        for ( int i = 0; i < size; ++i )
+            b[ i ] = 0;
+
+        mc ( b, a, size );
+        r = t.get_elapsed_ms ( );
+
+        std::cout << ( size_t ) r << " ms " << ( int ) b[ 1024 * 1024 - 1 ] << nl;
+
+        for ( int i = 0; i < size; ++i )
+            b[ i ] = 0;
+
+        t.start ( );
+        mc ( b, a, size );
+        r = t.get_elapsed_ms ( );
+
+        std::cout << ( size_t ) r << " ms " << ( int ) b[ 1024 * 1024 - 1 ] << nl;
+
+        exit ( 0 );
+
         /*
         void * r1 = sys::commit_page ( sys::reserve_pages ( 1'000'000 ).ptr, 1 * page_size_in_bytes ( ) );
 
