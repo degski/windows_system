@@ -73,15 +73,15 @@ Stream & operator<< ( Stream & out_, T const & n_ ) noexcept {
          << ( std::uint32_t ) ( ( std::uint16_t * ) n )[ 0 ];
     for ( int i = 1; i < 4; ++i )
         out_ << '\'' << std::setw ( 4 ) << ( std::uint32_t ) ( ( std::uint16_t * ) n )[ i ];
-    out_ << std::setfill ( ' ' ) << std::setw ( 0 ) << std::dec << std::nouppercase;
+    out_ << std::setfill ( ' ' ) << std::setw ( 0 ) << std::dec << std::nouppercase << lf;
     return out_;
 }
 
-constexpr size_t page_size ( ) noexcept { return 65'536ull; }
+constexpr size_t page_size_in_bytes ( ) noexcept { return 65'536ull; }
 
 template<typename T>
 constexpr size_t type_page_size ( ) noexcept {
-    return page_size ( ) / sizeof ( T );
+    return page_size_in_bytes ( ) / sizeof ( T );
 }
 
 struct vm_handle {
@@ -108,14 +108,14 @@ struct windows_system {
     }
 
     [[nodiscard]] static vm_handle reserve_pages ( size_t n_ ) noexcept {
-        return {
-            ( windows_system::reserved = { VirtualAlloc ( nullptr, n_ * page_size ( ), MEM_RESERVE, PAGE_NOACCESS ), n_ } ).ptr,
-            size_t{ 0 }
-        };
+        return { ( windows_system::reserved = { VirtualAlloc ( nullptr, n_ * page_size_in_bytes ( ), MEM_RESERVE, PAGE_NOACCESS ),
+                                                n_ } )
+                     .ptr,
+                 size_t{ 0 } };
     }
 
     static void free_reserved_pages ( ) noexcept {
-        VirtualFree ( windows_system::reserved.ptr, windows_system::reserved.size * page_size ( ), MEM_RELEASE );
+        VirtualFree ( windows_system::reserved.ptr, windows_system::reserved.size * page_size_in_bytes ( ), MEM_RELEASE );
         windows_system::reserved = vm_handle{ };
     }
 
@@ -319,11 +319,19 @@ struct vm_committed_ptr {
     }
 };
 #endif
-template<typename Value, size_t Capacity>
+template<typename SizeType> //, typename = std::enable_if_t<std::is_unsigned<SizeType>::value>>
+struct growth_policy {
+    [[nodiscard]] static SizeType grow ( SizeType const & cap_in_bytes_ ) noexcept { return cap_in_bytes_ << 1; }
+    [[nodiscard]] static SizeType shrink ( SizeType const & cap_in_bytes_ ) noexcept { return cap_in_bytes_ >> 1; }
+};
+
+// Overload std::is_scalar for your type if it can be copied with std::memcpy.
+
+template<typename ValueType, typename SizeType, SizeType Capacity, typename GrowthPolicy = growth_policy<SizeType>>
 struct virtual_vector {
 
     public:
-    using value_type = Value;
+    using value_type = ValueType;
 
     using pointer       = value_type *;
     using const_pointer = value_type const *;
@@ -332,7 +340,7 @@ struct virtual_vector {
     using const_reference = value_type const &;
     using rv_reference    = value_type &&;
 
-    using size_type       = std::size_t;
+    using size_type       = SizeType;
     using difference_type = std::make_signed<size_type>;
 
     using iterator               = pointer;
@@ -342,28 +350,122 @@ struct virtual_vector {
 
     virtual_vector ( ) noexcept = default;
 
-    ~virtual_vector ( ) noexcept {
-        if constexpr ( not std::is_scalar<Value>::value ) {
-            for ( auto & v : *this )
-                v.~value_type ( );
+    private:
+    void first_commit_impl ( size_type const & committed_in_bytes_ ) {
+        m_committed_in_bytes = page_size_in_bytes ( );
+        m_end = m_begin = reinterpret_cast<pointer> (
+            sys::commit_page ( reinterpret_cast<pointer> ( sys::reserve_pages ( Capacity / type_page_size<value_type> ( ) ).ptr ),
+                               committed_in_bytes_ ) );
+    }
+
+    public:
+    virtual_vector ( virtual_vector const & vv_ ) {
+        first_commit_impl ( vv_.m_committed_in_bytes );
+        if constexpr ( not std::is_scalar<value_type>::value ) {
+            std::memcpy ( m_begin, vv_.m_begin, vv_.m_end - vv_.begin );
         }
+        else {
+            for ( auto const & v : vv_ )
+                new ( m_end++ ) value_type{ v };
+        }
+    }
+
+    virtual_vector ( virtual_vector && vv_ ) noexcept { std::swap ( std::move ( vv_ ), *this ); }
+
+    ~virtual_vector ( ) noexcept {
+        clear_impl ( );
         sys::free_reserved_pages ( );
     }
+    /*
+    [[maybe_unused]] virtual_vector const & operator= ( virtual_vector const & vv_ ) const {
+        // Copy to the elements of this if they are exist (on both sides).
+        if ( size ( ) < vv_.size ( ) ) {
+            auto const area = std::span<value_type>{ vv_.m_begin, vv_.m_begin + size ( ) };
+            pointer end     = m_begin;
+            for ( auto const & v : area )
+                *end++ = v;
+            // Adjust committed.
+            if ( committed ( ) < vv_.commited ( ) ) {
+                // Grow this.
+            }
+            else {
+            }
 
-    void clear ( ) noexcept {
-        if constexpr ( not std::is_scalar<Value>::value ) {
-            for ( auto & v : *this )
-                v.~value_type ( );
+            area = std::span<value_type>{ vv_.m_begin + size ( ), vv_.m_end };
+            for ( auto const & v : area )
+                push_back ( v );
         }
-        m_end = m_begin;
+        else {
+        }
+
+        first_commit_impl ( vv_.m_committed_in_bytes );
+        if constexpr ( not std::is_scalar<value_type>::value ) {
+            std::memcpy ( m_begin, vv_.m_begin, vv_.m_end - vv_.begin );
+        }
+        else {
+            for ( auto const & v : vv_ )
+                new ( m_end++ ) value_type{ v };
+        }
+    }
+    */
+    private:
+    void push_up_committed ( size_type const to_commit_size_in_bytes_ ) noexcept {
+        size_type cib = committed_in_bytes ( );
+        pointer begin = m_end;
+        pointer end   = m_begin + to_commit_size_in_bytes_ / sizeof ( value_type );
+        for ( ; begin == end; cib = GrowthPolicy::grow ( cib ), begin += cib )
+            sys::commit_page ( begin, cib );
     }
 
+    // Tear down committed.
+    void tear_down_committed_ ( size_type const to_commit_size_in_bytes_ = 0u ) noexcept {
+        size_type cib      = GrowthPolicy::shrink ( m_committed_in_bytes );
+        pointer rbegin     = reinterpret_cast<pointer> ( reinterpret_cast<char *> ( m_begin ) - cib );
+        pointer const rend = reinterpret_cast<pointer> ( reinterpret_cast<char *> ( m_begin ) + to_commit_size_in_bytes_ );
+        for ( ; rbegin == rend; cib = GrowthPolicy::shrink ( cib ), rbegin -= cib )
+            sys::decommit_page ( rbegin, cib );
+        assert ( rbegin == m_begin );
+        if ( not to_commit_size_in_bytes_ )
+            sys::decommit_page ( m_begin, cib );
+    }
+
+    // Tear down committed.
+    void tear_down_committed ( ) noexcept {
+        size_type committed = page_size_in_bytes ( );
+        pointer end         = m_begin;
+        sys::decommit_page ( end, committed );
+        end += committed;
+        for ( ; end == m_end; committed = GrowthPolicy::grow ( committed ), end += committed )
+            sys::decommit_page ( end, committed );
+    }
+
+    void clear_impl ( ) noexcept {
+        if ( m_committed_in_bytes ) {
+            // Destroy object.
+            if constexpr ( not std::is_scalar<value_type>::value ) {
+                for ( auto & v : *this )
+                    v.~value_type ( );
+            }
+            tear_down_committed ( );
+        }
+    }
+
+    public:
+    void clear ( ) noexcept {
+        clear_impl ( );
+        // Reset to default state.
+        m_end                = m_begin;
+        m_committed_in_bytes = 0u;
+    }
+
+    private:
     [[nodiscard]] static constexpr size_type capacity_in_bytes ( ) noexcept { return Capacity * type_page_size<value_type> ( ); }
     // m_committed_in_bytes is a variable.
     [[nodiscard]] size_type size_in_bytes ( ) const noexcept {
         return reinterpret_cast<char *> ( m_end ) - reinterpret_cast<char *> ( m_begin );
     }
 
+    public:
     [[nodiscard]] static constexpr size_type capacity ( ) noexcept { return Capacity; }
     [[nodiscard]] size_type committed ( ) const noexcept { return m_committed_in_bytes / sizeof ( value_type ); }
     [[nodiscard]] size_type size ( ) const noexcept { return size_in_bytes ( ) / sizeof ( value_type ); }
@@ -375,13 +477,14 @@ struct virtual_vector {
         if ( m_begin ) {
             if ( size_in_bytes ( ) == m_committed_in_bytes ) {
                 sys::commit_page ( m_end, m_committed_in_bytes );
-                m_committed_in_bytes <<= 1; // Growth factor 2.
+                m_committed_in_bytes = GrowthPolicy::grow ( m_committed_in_bytes );
             }
         }
         else {
-            m_committed_in_bytes = page_size ( );
-            m_end = m_begin = reinterpret_cast<pointer> (
-                sys::commit_page ( reinterpret_cast<pointer> ( sys::reserve_pages ( Capacity ).ptr ), m_committed_in_bytes ) );
+            m_committed_in_bytes = page_size_in_bytes ( );
+            m_end = m_begin = reinterpret_cast<pointer> ( sys::commit_page (
+                reinterpret_cast<pointer> ( sys::reserve_pages ( Capacity / type_page_size<value_type> ( ) ).ptr ),
+                m_committed_in_bytes ) );
         }
         return *new ( m_end++ ) value_type{ std::forward<Args> ( value_ )... };
     }
@@ -391,7 +494,8 @@ struct virtual_vector {
     }
 
     // TODO vectorized std::copy.
-    // lowering growth factor when vector becomes really large as compared to free memory.
+    // TODO lowering growth factor when vector becomes really large as compared to free memory.
+    // TODO virtual_queue
 
     /*
     template<typename Pair>
@@ -459,6 +563,7 @@ struct virtual_vector {
         return const_cast<reference> ( std::as_const ( *this ).operator[] ( i_ ) );
     }
 
+    private:
     // Initialed with valid ptr to reserved memory and size = 0 (the number of committed pages).
     pointer m_begin = nullptr, m_end = nullptr;
     std::size_t m_committed_in_bytes;
@@ -480,11 +585,13 @@ int main ( ) {
 
     try {
         /*
-        void * r1 = sys::commit_page ( sys::reserve_pages ( 1'000'000 ).ptr, 1 * page_size ( ) );
+        void * r1 = sys::commit_page ( sys::reserve_pages ( 1'000'000 ).ptr, 1 * page_size_in_bytes ( ) );
 
-        void * r2 = sys::commit_page ( reinterpret_cast<int *> ( r1 ) + 1 * type_page_size<int> ( ), 1 * page_size ( ) );
+        void * r2 = sys::commit_page ( reinterpret_cast<int *> ( r1 ) + 1 * type_page_size<int> ( ), 1 * page_size_in_bytes ( )
+        );
 
-        void * r3 = sys::commit_page ( reinterpret_cast<int *> ( r1 ) + 2 * type_page_size<int> ( ), 2 * page_size ( ) );
+        void * r3 = sys::commit_page ( reinterpret_cast<int *> ( r1 ) + 2 * type_page_size<int> ( ), 2 * page_size_in_bytes ( )
+        );
 
         std::span<int> vvv{ reinterpret_cast<int *> ( r1 ), 4 * type_page_size<int> ( ) };
 
@@ -492,7 +599,7 @@ int main ( ) {
         for ( auto & v : vvv )
             new ( std::addressof ( v ) ) int{ i++ };
         */
-        virtual_vector<int, 1'000'000> vv;
+        virtual_vector<int, size_t, 1'000'000> vv;
 
         for ( int i = 0; i < 16'384; ++i )
             vv.emplace_back ( i );
