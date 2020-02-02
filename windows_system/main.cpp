@@ -372,13 +372,9 @@ struct virtual_vector {
 
     template<typename... Args>
     reference emplace_back ( Args &&... value_ ) noexcept {
-        static int i = 0;
         if ( m_begin ) {
-
             if ( size_in_bytes ( ) == m_committed_in_bytes ) {
-
                 win_system::commit_page ( m_end, m_committed_in_bytes );
-
                 m_committed_in_bytes <<= 1;
             }
         }
@@ -387,10 +383,7 @@ struct virtual_vector {
             m_begin              = reinterpret_cast<pointer> ( win_system::reserve_pages ( Capacity ).ptr );
             m_end = m_begin = reinterpret_cast<pointer> ( win_system::commit_page ( m_begin, m_committed_in_bytes ) );
         }
-        ++i;
         auto p = new ( m_end ) value_type{ std::forward<Args> ( value_ )... };
-        // std::cout << "inc (end, count, size, comm) " << ' ' << m_end << ' ' << i << ' ' << size_in_bytes ( ) << " "
-        //       << m_committed_in_bytes << std::endl;
         ++m_end;
         return *p;
     }
