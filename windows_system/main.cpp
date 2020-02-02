@@ -410,7 +410,7 @@ struct virtual_vector {
     */
     private:
     void push_up_committed ( size_type const to_commit_size_in_bytes_ ) noexcept {
-        size_type cib = committed_in_bytes ( );
+        size_type cib = m_committed_in_bytes;
         pointer begin = m_end;
         pointer end   = m_begin + to_commit_size_in_bytes_ / sizeof ( value_type );
         for ( ; begin == end; cib = GrowthPolicy::grow ( cib ), begin += cib )
@@ -586,15 +586,28 @@ inline void memcpy_avx ( void * dst, void const * src, size_t size ) noexcept {
     }
 }
 
+inline void memcpy_sse ( void * dst, void const * src, size_t size ) noexcept {
+    size_t stride = 2 * sizeof ( __m128 );
+    while ( size ) {
+        __m128 a = _mm_load_ps ( ( float * ) ( reinterpret_cast<uint8_t const *> ( src ) + 0 * sizeof ( __m128 ) ) );
+        __m128 b = _mm_load_ps ( ( float * ) ( reinterpret_cast<uint8_t const *> ( src ) + 1 * sizeof ( __m128 ) ) );
+        _mm_stream_ps ( ( float * ) ( reinterpret_cast<uint8_t *> ( dst ) + 0 * sizeof ( __m128 ) ), a );
+        _mm_stream_ps ( ( float * ) ( reinterpret_cast<uint8_t *> ( dst ) + 1 * sizeof ( __m128 ) ), b );
+        size -= stride;
+        src = reinterpret_cast<uint8_t const *> ( src ) + stride;
+        dst = reinterpret_cast<uint8_t *> ( dst ) + stride;
+    }
+}
+
 } // namespace sax
 
 #include <plf/plf_nanotimer.h>
 
-#if 1
+#if 0
 #    define mc sax::memcpy_avx
 
 #else
-#    define mc std::memcpy
+#    define mc sax::memcpy_sse
 #endif
 int main ( ) {
 
