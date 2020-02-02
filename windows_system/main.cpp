@@ -107,9 +107,11 @@ struct windows_system {
     }
 
     // Reserve a 10 MB range of addresses.
-    static void_p reserve_pages ( size_t n_ ) noexcept {
-        windows_system::reserved = { VirtualAlloc ( nullptr, n_ * page_size ( ), MEM_RESERVE, PAGE_NOACCESS ), n_ };
-        return reserved.ptr;
+    [[nodiscard]] static void_p reserve_pages ( size_t n_ ) noexcept {
+        void_p const p           = VirtualAlloc ( nullptr, n_ / page_size ( ), MEM_RESERVE, PAGE_NOACCESS );
+        windows_system::reserved = { p, n_ };
+        std::cout << "reserved " << p << std::endl;
+        return p;
     }
 
     static void free_reserved_pages ( ) noexcept {
@@ -118,12 +120,14 @@ struct windows_system {
     }
 
     public:
-    [[nodiscard]] static void_p commit_page ( void_p ptr_, size_t size_ ) noexcept {
+    static void_p commit_page ( void_p ptr_, size_t size_ ) noexcept {
 
-        std::cout << "commit page at " << ptr_ << " with size " << std::hex << std::uppercase << size_ << std::nouppercase
-                  << std::dec << nl;
+        void_p const p = VirtualAlloc ( ptr_, size_, MEM_COMMIT, PAGE_READWRITE );
 
-        return VirtualAlloc ( ptr_, size_, MEM_COMMIT, PAGE_READWRITE );
+        std::cout << "commit page at " << ptr_ << " " << p << " with size " << std::hex << std::uppercase << size_
+                  << std::nouppercase << std::dec << nl;
+
+        return p;
     }
     static void decommit_page ( void_p ptr_, size_t size_ ) noexcept { VirtualFree ( ptr_, size_, MEM_DECOMMIT, PAGE_NOACCESS ); }
 
@@ -343,7 +347,9 @@ struct virtual_vector {
 
     virtual_vector ( ) :
         m_begin ( reinterpret_cast<pointer> ( win_system::reserve_pages ( Capacity ) ) ), m_end ( m_begin ),
-        m_next_size ( page_size ( ) ) {}
+        m_committed_in_bytes ( page_size ( ) ) {
+        std::cout << m_begin << std::endl;
+    }
 
     ~virtual_vector ( ) {}
 
@@ -355,31 +361,38 @@ struct virtual_vector {
         m_end = m_begin;
     }
 
-    [[nodiscard]] static constexpr size_type capacity ( ) noexcept {
-        return Capacity * ( ( std::numeric_limits<std::uint16_t>::max ( ) + 1 ) / sizeof ( value_type ) );
+    [[nodiscard]] static constexpr size_type capacity ( ) noexcept { return Capacity * sizeof ( value_type ); }
+    [[nodiscard]] size_type size_in_bytes ( ) const noexcept {
+        return reinterpret_cast<char *> ( m_end ) - reinterpret_cast<char *> ( m_begin );
     }
-    [[nodiscard]] size_type committed ( ) const noexcept {
-        return m_next_size * ( ( std::numeric_limits<std::uint16_t>::max ( ) + 1 ) / sizeof ( value_type ) );
-    }
-    [[nodiscard]] size_type size ( ) const noexcept { return m_end - reinterpret_cast<pointer> ( m_begin ); }
+
+    [[nodiscard]] size_type committed ( ) const noexcept { return m_committed_in_bytes / sizeof ( value_type ); }
+    [[nodiscard]] size_type size ( ) const noexcept { return size_in_bytes ( ) / sizeof ( value_type ); }
 
     [[nodiscard]] static constexpr size_type max_size ( ) noexcept { return capacity ( ); }
 
     template<typename... Args>
     reference emplace_back ( Args &&... value_ ) noexcept {
+        static int i = 0;
         if ( m_begin ) {
-            if ( size ( ) == committed ( ) ) {
-                std::cout << "inc" << ' ';
-                win_system::commit_page ( m_end, m_next_size );
-                m_next_size <<= 1;
+
+            if ( size_in_bytes ( ) == m_committed_in_bytes ) {
+
+                win_system::commit_page ( m_end, m_committed_in_bytes );
+
+                m_committed_in_bytes <<= 1;
             }
         }
         else {
             std::cout << "init" << nl;
-            m_begin = win_system::commit_page ( m_begin, m_next_size );
-            m_end   = reinterpret_cast<pointer> ( m_begin );
+            m_end = m_begin = reinterpret_cast<pointer> ( win_system::commit_page ( m_begin, m_committed_in_bytes ) );
         }
-        return *new ( m_end++ ) value_type{ std::forward<Args> ( value_ )... };
+        ++i;
+        auto p = new ( m_end ) value_type{ std::forward<Args> ( value_ )... };
+        std::cout << "inc (end, count, size, comm) " << ' ' << m_end << ' ' << i << ' ' << size_in_bytes ( ) << " "
+                  << m_committed_in_bytes << std::endl;
+        ++m_end;
+        return *p;
     }
     /*
     template<typename Pair>
@@ -453,7 +466,7 @@ struct virtual_vector {
 
     // Initialed with valid ptr to reserved memory and size = 0 (the number of committed pages).
     pointer m_begin = nullptr, m_end = nullptr;
-    std::size_t m_next_size;
+    std::size_t m_committed_in_bytes;
 };
 
 void handleEptr ( std::exception_ptr eptr ) { // Passing by value is ok.
@@ -474,35 +487,44 @@ int main ( ) {
 
         void * r1 = win_system::commit_page ( win_system::reserve_pages ( 1'000'000 ), 1 * page_size ( ) );
 
-        void * r2 = win_system::commit_page ( reinterpret_cast<int *> ( r1 ) + 1 * type_page_size<int> ( ), 1 * page_size ( ) );
+        void * r2 = win_system::commit_page ( reinterpret_cast<int *> ( r1 ) + 1 * page_size ( ), 1 * page_size ( ) );
 
-        void * r3 = win_system::commit_page ( reinterpret_cast<int *> ( r1 ) + 2 * type_page_size<int> ( ), 2 * page_size ( ) );
+        void * r3 = win_system::commit_page ( reinterpret_cast<int *> ( r1 ) + 2 * page_size ( ), 2 * page_size ( ) );
 
-        std::span<int> vv{ reinterpret_cast<int *> ( r1 ), 4 * type_page_size<int> ( ) };
+        std::span<int> m{ reinterpret_cast<int *> ( r1 ), 4 * type_page_size<int> ( ) };
 
         int i = 0;
-        for ( auto & v : vv )
+        for ( auto & v : m )
             new ( std::addressof ( v ) ) int{ i++ };
 
         /*
-        virtual_vector<int, 1'000'000'000'000> vv;
+        virtual_vector<int, 1'000'000> vv;
+
+        vv.emplace_back ( 16'384 );
+
+        std::cout << vv.size ( ) << " " << vv.committed ( ) << std::endl;
+
+        exit ( 0 );
 
         for ( int i = 0; i < 16'384; ++i )
             vv.emplace_back ( i );
 
-        std::cout << vv.size ( ) << " " << vv.committed ( ) << nl;
+        std::cout << vv.size ( ) << " " << vv.committed ( ) << std::endl;
 
-        for ( auto & v : vv )
-            std::cout << v << ' ';
-        std::cout << nl;
+        // for ( auto & v : vv )
+        //     std::cout << v << ' ';
+        //  std::cout << nl;
 
         vv.emplace_back ( 16'384 );
 
-        std::cout << vv.size ( ) << " " << vv.committed ( ) << nl;
-        */
+        exit ( 0 );
+
+        std::cout << vv.size ( ) << " " << vv.committed ( ) << std::endl;
+
         for ( auto & v : vv )
             std::cout << v << ' ';
         std::cout << nl;
+        */
     }
     catch ( ... ) {
         eptr = std::current_exception ( ); // Capture.
