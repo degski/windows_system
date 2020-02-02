@@ -77,11 +77,12 @@ Stream & operator<< ( Stream & out_, T const & n_ ) noexcept {
     return out_;
 }
 
+constexpr size_t page_size ( ) noexcept { return 65'536ull; }
+
 template<typename T>
 constexpr size_t type_page_size ( ) noexcept {
-    return 65'384ull / sizeof ( T );
+    return page_size ( ) / sizeof ( T );
 }
-constexpr size_t page_size ( ) noexcept { return 65'384ull; }
 
 struct vm_handle {
     using void_p = void *;
@@ -106,33 +107,24 @@ struct windows_system {
         }
     }
 
-    // Reserve a 10 MB range of addresses.
     [[nodiscard]] static vm_handle reserve_pages ( size_t n_ ) noexcept {
-        return { ( windows_system::reserved = { VirtualAlloc ( nullptr, n_ * ( std::numeric_limits<std::uint16_t>::max ( ) + 1 ),
-                                                               MEM_RESERVE, PAGE_NOACCESS ),
-                                                n_ } )
-                     .ptr,
-                 size_t{ 0 } };
+        return {
+            ( windows_system::reserved = { VirtualAlloc ( nullptr, n_ * page_size ( ), MEM_RESERVE, PAGE_NOACCESS ), n_ } ).ptr,
+            size_t{ 0 }
+        };
     }
 
     static void free_reserved_pages ( ) noexcept {
-        VirtualFree ( windows_system::reserved.ptr,
-                      windows_system::reserved.size * ( std::numeric_limits<std::uint16_t>::max ( ) + 1 ), MEM_DECOMMIT,
-                      PAGE_NOACCESS );
+        VirtualFree ( windows_system::reserved.ptr, windows_system::reserved.size * page_size ( ), MEM_RELEASE );
         windows_system::reserved = vm_handle{ };
     }
 
     public:
-    [[nodiscard]] static void_p commit_page ( void_p ptr_, size_t size_ ) noexcept {
-        // std::cout << "commit page at " << handle_.ptr << " with size " << std::hex << std::uppercase << handle_.size
-        //          << std::nouppercase << std::dec << nl;
-
+    static void_p commit_page ( void_p ptr_, size_t size_ ) noexcept {
         return VirtualAlloc ( ptr_, size_, MEM_COMMIT, PAGE_READWRITE );
     }
-    static void decommit_page ( vm_handle & handle_ ) noexcept {
-        VirtualFree ( handle_.ptr, handle_.size * ( std::numeric_limits<std::uint16_t>::max ( ) + 1 ), MEM_DECOMMIT,
-                      PAGE_NOACCESS );
-    }
+
+    static void decommit_page ( void_p ptr_, size_t size_ ) noexcept { VirtualFree ( ptr_, size_, MEM_DECOMMIT ); }
 
     // Decommit memory for 3rd page of addresses.
 
@@ -209,7 +201,7 @@ vm_handle windows_system<SizeType>::reserved;
 template<typename SizeType>
 SYSTEM_INFO windows_system<SizeType>::info = get_system_information ( );
 
-using win_system = windows_system<unsigned long>;
+using sys = windows_system<unsigned long>;
 
 #if 0
 
@@ -242,13 +234,13 @@ struct vm_committed_ptr {
         std::swap ( tmp, *this );
     }
 
-    vm_committed_ptr ( vm_handle && h_ ) noexcept : handle ( h_.ptr ? win_system::commit_page ( h_ ) : vm_handle{ } ) {}
+    vm_committed_ptr ( vm_handle && h_ ) noexcept : handle ( h_.ptr ? sys::commit_page ( h_ ) : vm_handle{ } ) {}
 
     // Destruct.
 
     ~vm_committed_ptr ( ) noexcept {
         if ( handle.ptr )
-            win_system::decommit_page ( handle );
+            sys::decommit_page ( handle );
     }
 
     // Assignment.
@@ -270,7 +262,7 @@ struct vm_committed_ptr {
     [[maybe_unused]] vm_committed_ptr & operator= ( vm_handle && moving_ ) noexcept {
         handle = moving_;
         if ( handle.ptr )
-            win_system::commit_page ( handle );
+            sys::commit_page ( handle );
         return *this;
     }
 
@@ -301,18 +293,18 @@ struct vm_committed_ptr {
     public:
     void reset ( ) noexcept {
         vm_committed_ptr tmp = release ( );
-        win_system::decommit_page ( tmp );
+        sys::decommit_page ( tmp );
     }
     void reset ( vm_handle && h_ ) noexcept {
         vm_committed_ptr tmp ( std::move ( h_ ) );
         std::swap ( tmp, *this );
-        win_system::decommit_page ( tmp );
+        sys::decommit_page ( tmp );
     }
     template<typename U>
     void reset ( vm_committed_ptr<U> && moving_ ) noexcept {
         vm_committed_ptr<value_type> tmp ( std::move ( moving_ ) );
         std::swap ( tmp, *this );
-        win_system::decommit_page ( tmp );
+        sys::decommit_page ( tmp );
     }
 
     private:
@@ -350,7 +342,13 @@ struct virtual_vector {
 
     virtual_vector ( ) noexcept = default;
 
-    ~virtual_vector ( ) {}
+    ~virtual_vector ( ) noexcept {
+        if constexpr ( not std::is_scalar<Value>::value ) {
+            for ( auto & v : *this )
+                v.~value_type ( );
+        }
+        sys::free_reserved_pages ( );
+    }
 
     void clear ( ) noexcept {
         if constexpr ( not std::is_scalar<Value>::value ) {
@@ -360,11 +358,13 @@ struct virtual_vector {
         m_end = m_begin;
     }
 
-    [[nodiscard]] static constexpr size_type capacity ( ) noexcept { return Capacity; }
+    [[nodiscard]] static constexpr size_type capacity_in_bytes ( ) noexcept { return Capacity * type_page_size<value_type> ( ); }
+    // m_committed_in_bytes is a variable.
     [[nodiscard]] size_type size_in_bytes ( ) const noexcept {
         return reinterpret_cast<char *> ( m_end ) - reinterpret_cast<char *> ( m_begin );
     }
 
+    [[nodiscard]] static constexpr size_type capacity ( ) noexcept { return Capacity; }
     [[nodiscard]] size_type committed ( ) const noexcept { return m_committed_in_bytes / sizeof ( value_type ); }
     [[nodiscard]] size_type size ( ) const noexcept { return size_in_bytes ( ) / sizeof ( value_type ); }
 
@@ -374,19 +374,25 @@ struct virtual_vector {
     reference emplace_back ( Args &&... value_ ) noexcept {
         if ( m_begin ) {
             if ( size_in_bytes ( ) == m_committed_in_bytes ) {
-                win_system::commit_page ( m_end, m_committed_in_bytes );
-                m_committed_in_bytes <<= 1;
+                sys::commit_page ( m_end, m_committed_in_bytes );
+                m_committed_in_bytes <<= 1; // Growth factor 2.
             }
         }
         else {
             m_committed_in_bytes = page_size ( );
-            m_end = m_begin = reinterpret_cast<pointer> ( win_system::commit_page (
-                reinterpret_cast<pointer> ( win_system::reserve_pages ( Capacity ).ptr ), m_committed_in_bytes ) );
+            m_end = m_begin = reinterpret_cast<pointer> (
+                sys::commit_page ( reinterpret_cast<pointer> ( sys::reserve_pages ( Capacity ).ptr ), m_committed_in_bytes ) );
         }
-        auto p = new ( m_end ) value_type{ std::forward<Args> ( value_ )... };
-        ++m_end;
-        return *p;
+        return *new ( m_end++ ) value_type{ std::forward<Args> ( value_ )... };
     }
+    template<typename... Args>
+    reference push_back ( Args &&... value_ ) noexcept {
+        emplace_back ( value_type{ std::forward<Args> ( value_ )... } );
+    }
+
+    // TODO vectorized std::copy.
+    // lowering growth factor when vector becomes really large as compared to free memory.
+
     /*
     template<typename Pair>
     struct map_comaparator {
@@ -474,11 +480,11 @@ int main ( ) {
 
     try {
         /*
-        void * r1 = win_system::commit_page ( win_system::reserve_pages ( 1'000'000 ).ptr, 1 * page_size ( ) );
+        void * r1 = sys::commit_page ( sys::reserve_pages ( 1'000'000 ).ptr, 1 * page_size ( ) );
 
-        void * r2 = win_system::commit_page ( reinterpret_cast<int *> ( r1 ) + 1 * type_page_size<int> ( ), 1 * page_size ( ) );
+        void * r2 = sys::commit_page ( reinterpret_cast<int *> ( r1 ) + 1 * type_page_size<int> ( ), 1 * page_size ( ) );
 
-        void * r3 = win_system::commit_page ( reinterpret_cast<int *> ( r1 ) + 2 * type_page_size<int> ( ), 2 * page_size ( ) );
+        void * r3 = sys::commit_page ( reinterpret_cast<int *> ( r1 ) + 2 * type_page_size<int> ( ), 2 * page_size ( ) );
 
         std::span<int> vvv{ reinterpret_cast<int *> ( r1 ), 4 * type_page_size<int> ( ) };
 
