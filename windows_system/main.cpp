@@ -380,8 +380,8 @@ struct virtual_vector {
         }
         else {
             m_committed_in_bytes = page_size ( );
-            m_begin              = reinterpret_cast<pointer> ( win_system::reserve_pages ( Capacity ).ptr );
-            m_end = m_begin = reinterpret_cast<pointer> ( win_system::commit_page ( m_begin, m_committed_in_bytes ) );
+            m_end = m_begin = reinterpret_cast<pointer> ( win_system::commit_page (
+                reinterpret_cast<pointer> ( win_system::reserve_pages ( Capacity ).ptr ), m_committed_in_bytes ) );
         }
         auto p = new ( m_end ) value_type{ std::forward<Args> ( value_ )... };
         ++m_end;
