@@ -74,22 +74,22 @@ struct windows_system {
 
     ~windows_system ( ) noexcept {
         if ( m_reserved_ptr ) {
-            VirtualFree ( windows_system::m_reserved_ptr, windows_system::m_reserved_size * page_size_in_bytes ( ), MEM_RELEASE );
-            windows_system::m_reserved_ptr  = nullptr;
-            windows_system::m_reserved_size = 0u;
+            VirtualFree ( m_reserved_ptr, m_reserved_size * page_size_in_bytes ( ), MEM_RELEASE );
+            m_reserved_ptr  = nullptr;
+            m_reserved_size = 0u;
         }
     }
 
     [[nodiscard]] static void_p reserve_pages ( size_t n_ ) noexcept {
-        windows_system::m_reserved_ptr  = VirtualAlloc ( nullptr, n_ * page_size_in_bytes ( ), MEM_RESERVE, PAGE_NOACCESS );
-        windows_system::m_reserved_size = n_;
-        return windows_system::m_reserved_ptr;
+        m_reserved_ptr  = VirtualAlloc ( nullptr, n_ * page_size_in_bytes ( ), MEM_RESERVE, PAGE_NOACCESS );
+        m_reserved_size = n_;
+        return m_reserved_ptr;
     }
 
     static void free_reserved_pages ( ) noexcept {
-        VirtualFree ( windows_system::m_reserved_ptr, windows_system::m_reserved_size * page_size_in_bytes ( ), MEM_RELEASE );
-        windows_system::m_reserved_ptr  = nullptr;
-        windows_system::m_reserved_size = 0u;
+        VirtualFree ( m_reserved_ptr, m_reserved_size * page_size_in_bytes ( ), MEM_RELEASE );
+        m_reserved_ptr  = nullptr;
+        m_reserved_size = 0u;
     }
 
     public:
