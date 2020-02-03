@@ -101,18 +101,6 @@
 
 // https://stackoverflow.com/questions/251248/how-can-i-get-the-sid-of-the-current-windows-account#251267
 
-constexpr size_t page_size_in_bytes ( size_t large_page_size_ = 0u ) noexcept {
-    if ( large_page_size_ )
-        return large_page_size_;
-    return 65'536ull;
-}
-// 2'097'152
-template<typename T>
-constexpr size_t type_page_size ( size_t large_page_size_ = 0u ) noexcept {
-    assert ( ( page_size_in_bytes ( ) / sizeof ( T ) ) * sizeof ( T ) == page_size_in_bytes ( ) );
-    return page_size_in_bytes ( ) / sizeof ( T );
-}
-
 template<bool have_large_pages = false>
 struct windows_system {
 
@@ -120,12 +108,20 @@ struct windows_system {
 
     static void_p m_reserved_ptr;
     static size_t m_reserved_size;
+    static size_t const page_size_in_bytes;
+
+    // 2'097'152
+    template<typename T>
+    static constexpr size_t type_page_size ( size_t large_page_size_ = 0u ) noexcept {
+        assert ( ( page_size_in_bytes / sizeof ( T ) ) * sizeof ( T ) == page_size_in_bytes );
+        return page_size_in_bytes / sizeof ( T );
+    }
 
     windows_system ( ) = delete;
 
     ~windows_system ( ) noexcept {
         if ( m_reserved_ptr ) {
-            VirtualFree ( m_reserved_ptr, static_cast<unsigned long> ( m_reserved_size * page_size_in_bytes ( ) ),
+            VirtualFree ( m_reserved_ptr, static_cast<unsigned long> ( m_reserved_size * page_size_in_bytes ),
                           MEM_RELEASE | ( have_large_pages ? MEM_LARGE_PAGES : 0u ) );
             m_reserved_ptr  = nullptr;
             m_reserved_size = 0u;
@@ -133,14 +129,14 @@ struct windows_system {
     }
 
     [[nodiscard]] static void_p reserve_pages ( size_t n_ ) noexcept {
-        m_reserved_ptr  = VirtualAlloc ( nullptr, static_cast<unsigned long> ( n_ * page_size_in_bytes ( ) ),
+        m_reserved_ptr  = VirtualAlloc ( nullptr, static_cast<unsigned long> ( n_ * page_size_in_bytes ),
                                         MEM_RESERVE | ( have_large_pages ? MEM_LARGE_PAGES : 0u ), PAGE_NOACCESS );
         m_reserved_size = n_;
         return m_reserved_ptr;
     }
 
     static void free_reserved_pages ( ) noexcept {
-        VirtualFree ( m_reserved_ptr, static_cast<unsigned long> ( m_reserved_size * page_size_in_bytes ( ) ),
+        VirtualFree ( m_reserved_ptr, static_cast<unsigned long> ( m_reserved_size * page_size_in_bytes ),
                       MEM_RELEASE | ( have_large_pages ? MEM_LARGE_PAGES : 0u ) );
         m_reserved_ptr  = nullptr;
         m_reserved_size = 0u;
@@ -236,6 +232,8 @@ template<bool have_large_pages>
 void * windows_system<have_large_pages>::m_reserved_ptr = nullptr;
 template<bool have_large_pages>
 size_t windows_system<have_large_pages>::m_reserved_size = 0u;
+template<bool have_large_pages>
+size_t const windows_system<have_large_pages>::page_size_in_bytes = have_large_pages ? GetLargePageMinimum ( ) : 65'536ull;
 
 template<bool have_large_pages>
 SYSTEM_INFO windows_system<have_large_pages>::info = get_system_information ( );
@@ -275,9 +273,9 @@ struct virtual_vector {
 
     private:
     void first_commit_impl ( size_type page_size_in_bytes_ = 0u ) {
-        m_committed_in_bytes = page_size_in_bytes_ ? page_size_in_bytes_ : page_size_in_bytes ( );
+        m_committed_in_bytes = page_size_in_bytes_ ? page_size_in_bytes_ : sys::page_size_in_bytes;
         m_end = m_begin = reinterpret_cast<pointer> (
-            sys::commit_page ( reinterpret_cast<pointer> ( sys::reserve_pages ( Capacity / type_page_size<value_type> ( ) ) ),
+            sys::commit_page ( reinterpret_cast<pointer> ( sys::reserve_pages ( Capacity / sys::type_page_size<value_type> ( ) ) ),
                                m_committed_in_bytes ) );
     }
 
@@ -344,11 +342,11 @@ struct virtual_vector {
     void tear_down_committed ( size_type const to_commit_size_in_bytes_ = 0u ) noexcept {
         size_type com                = GrowthPolicy::shrink ( committed ( ) );
         pointer rbegin               = m_begin + com;
-        size_type const to_committed = std::max ( page_size_in_bytes ( ), to_commit_size_in_bytes_ );
+        size_type const to_committed = std::max ( sys::page_size_in_bytes, to_commit_size_in_bytes_ );
         for ( ; to_committed == com; com = GrowthPolicy::shrink ( com ), rbegin -= com )
             sys::decommit_page ( rbegin, com );
         if ( not to_commit_size_in_bytes_ )
-            sys::decommit_page ( m_begin, page_size_in_bytes ( ) );
+            sys::decommit_page ( m_begin, sys::page_size_in_bytes );
     }
 
     void clear_impl ( ) noexcept {
