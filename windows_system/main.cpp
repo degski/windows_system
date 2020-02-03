@@ -88,8 +88,7 @@
     else
         tp.Privileges[ 0 ].Attributes = 0;
     // Enable the privilege or disable all privileges.
-    if ( not AdjustTokenPrivileges ( token, false, &tp, sizeof ( TOKEN_PRIVILEGES ), ( PTOKEN_PRIVILEGES ) nullptr,
-                                     ( PDWORD ) nullptr ) ) {
+    if ( not AdjustTokenPrivileges ( token, false, &tp, sizeof ( TOKEN_PRIVILEGES ), nullptr, nullptr ) ) {
         std::cout << "AdjustTokenPrivileges error:" << GetLastError ( ) << nl;
         return false;
     }
