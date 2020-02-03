@@ -101,14 +101,19 @@
 
 // https://stackoverflow.com/questions/251248/how-can-i-get-the-sid-of-the-current-windows-account#251267
 
-constexpr size_t page_size_in_bytes ( ) noexcept { return 65'536ull; }
-
+constexpr size_t page_size_in_bytes ( size_t large_page_size_ = 0u ) noexcept {
+    if ( large_page_size_ )
+        return large_page_size_;
+    return 65'536ull;
+}
+// 2'097'152
 template<typename T>
-constexpr size_t type_page_size ( ) noexcept {
+constexpr size_t type_page_size ( size_t large_page_size_ = 0u ) noexcept {
+    assert ( ( page_size_in_bytes ( ) / sizeof ( T ) ) * sizeof ( T ) == page_size_in_bytes ( ) );
     return page_size_in_bytes ( ) / sizeof ( T );
 }
 
-template<typename SizeType = unsigned long>
+template<bool have_large_pages = false>
 struct windows_system {
 
     using void_p = void *;
@@ -120,40 +125,43 @@ struct windows_system {
 
     ~windows_system ( ) noexcept {
         if ( m_reserved_ptr ) {
-            VirtualFree ( m_reserved_ptr, static_cast<unsigned long> ( m_reserved_size * page_size_in_bytes ( ) ), MEM_RELEASE );
+            VirtualFree ( m_reserved_ptr, static_cast<unsigned long> ( m_reserved_size * page_size_in_bytes ( ) ),
+                          MEM_RELEASE | ( have_large_pages ? MEM_LARGE_PAGES : 0u ) );
             m_reserved_ptr  = nullptr;
             m_reserved_size = 0u;
         }
     }
 
     [[nodiscard]] static void_p reserve_pages ( size_t n_ ) noexcept {
-        m_reserved_ptr =
-            VirtualAlloc ( nullptr, static_cast<unsigned long> ( n_ * page_size_in_bytes ( ) ), MEM_RESERVE, PAGE_NOACCESS );
+        m_reserved_ptr  = VirtualAlloc ( nullptr, static_cast<unsigned long> ( n_ * page_size_in_bytes ( ) ),
+                                        MEM_RESERVE | ( have_large_pages ? MEM_LARGE_PAGES : 0u ), PAGE_NOACCESS );
         m_reserved_size = n_;
         return m_reserved_ptr;
     }
 
     static void free_reserved_pages ( ) noexcept {
-        VirtualFree ( m_reserved_ptr, static_cast<unsigned long> ( m_reserved_size * page_size_in_bytes ( ) ), MEM_RELEASE );
+        VirtualFree ( m_reserved_ptr, static_cast<unsigned long> ( m_reserved_size * page_size_in_bytes ( ) ),
+                      MEM_RELEASE | ( have_large_pages ? MEM_LARGE_PAGES : 0u ) );
         m_reserved_ptr  = nullptr;
         m_reserved_size = 0u;
     }
 
     public:
     static void_p commit_page ( void_p ptr_, size_t size_ ) noexcept {
-        return VirtualAlloc ( ptr_, static_cast<unsigned long> ( size_ ), MEM_COMMIT, PAGE_READWRITE );
+        return VirtualAlloc ( ptr_, static_cast<unsigned long> ( size_ ), MEM_COMMIT | ( have_large_pages ? MEM_LARGE_PAGES : 0u ),
+                              PAGE_READWRITE );
     }
 
     static void decommit_page ( void_p ptr_, size_t size_ ) noexcept {
-        VirtualFree ( ptr_, static_cast<unsigned long> ( size_ ), MEM_DECOMMIT );
+        VirtualFree ( ptr_, static_cast<unsigned long> ( size_ ), MEM_DECOMMIT | ( have_large_pages ? MEM_LARGE_PAGES : 0u ) );
     }
 
     static void_p reset_page ( void_p ptr_, size_t size_ ) noexcept {
-        return VirtualAlloc ( ptr_, static_cast<unsigned long> ( size_ ), MEM_RESET );
+        return VirtualAlloc ( ptr_, static_cast<unsigned long> ( size_ ), MEM_RESET | ( have_large_pages ? MEM_LARGE_PAGES : 0u ) );
     }
 
     static void reset_undo_page ( void_p ptr_, size_t size_ ) noexcept {
-        VirtualFree ( ptr_, static_cast<unsigned long> ( size_ ), MEM_RESET_UNDO );
+        VirtualFree ( ptr_, static_cast<unsigned long> ( size_ ), MEM_RESET_UNDO | ( have_large_pages ? MEM_LARGE_PAGES : 0u ) );
     }
 
     [[nodiscard]] size_t large_page_minimum ( ) noexcept { return GetLargePageMinimum ( ); }
@@ -224,15 +232,15 @@ struct windows_system {
     //
 };
 
-template<typename SizeType>
-void * windows_system<SizeType>::m_reserved_ptr = nullptr;
-template<typename SizeType>
-size_t windows_system<SizeType>::m_reserved_size = 0u;
+template<bool have_large_pages>
+void * windows_system<have_large_pages>::m_reserved_ptr = nullptr;
+template<bool have_large_pages>
+size_t windows_system<have_large_pages>::m_reserved_size = 0u;
 
-template<typename SizeType>
-SYSTEM_INFO windows_system<SizeType>::info = get_system_information ( );
+template<bool have_large_pages>
+SYSTEM_INFO windows_system<have_large_pages>::info = get_system_information ( );
 
-using sys = windows_system<unsigned long>;
+using sys = windows_system<false>;
 
 template<typename SizeType, typename = std::enable_if_t<std::is_unsigned<SizeType>::value>>
 struct growth_policy {
