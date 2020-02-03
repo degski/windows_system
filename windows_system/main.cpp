@@ -55,6 +55,53 @@
     C:\Program Files\LLVM\lib\clang\10.0.0\lib\windows\clang_rt.asan-x86_64.lib
 */
 
+#include <processthreadsapi.h>
+
+#pragma comment( lib, "Advapi32.lib" )
+
+[[nodiscard]] void * get_token_handle ( ) noexcept {
+    void * token_handle = nullptr;
+    OpenThreadToken ( GetCurrentThread ( ), TOKEN_ADJUST_PRIVILEGES, false, &token_handle );
+    if ( GetLastError ( ) == ERROR_NO_TOKEN ) {
+        if ( not OpenProcessToken ( GetCurrentProcess ( ), TOKEN_ADJUST_PRIVILEGES, &token_handle ) )
+            std::cout << "OpenProcessToken error:" << GetLastError ( ) << nl;
+    }
+    return token_handle;
+}
+
+[[nodiscard]] bool set_privilege ( void * token,                         // access token handle
+                                   wchar_t const * const privilege_name, // name of privilege to enable/disable
+                                   bool enable_privilige ) noexcept {    // to enable or disable privilege
+    // https://docs.microsoft.com/en-us/windows/win32/secauthz/enabling-and-disabling-privileges-in-c--
+    TOKEN_PRIVILEGES tp;
+    LUID luid;
+    if ( not LookupPrivilegeValue ( nullptr,        // lookup privilege on local system
+                                    privilege_name, // privilege to lookup
+                                    &luid ) ) {     // receives LUID of privilege
+        std::cout << "LookupPrivilegeValue error: " << GetLastError ( ) << nl;
+        return false;
+    }
+    tp.PrivilegeCount       = 1;
+    tp.Privileges[ 0 ].Luid = luid;
+    if ( enable_privilige )
+        tp.Privileges[ 0 ].Attributes = SE_PRIVILEGE_ENABLED;
+    else
+        tp.Privileges[ 0 ].Attributes = 0;
+    // Enable the privilege or disable all privileges.
+    if ( not AdjustTokenPrivileges ( token, false, &tp, sizeof ( TOKEN_PRIVILEGES ), ( PTOKEN_PRIVILEGES ) nullptr,
+                                     ( PDWORD ) nullptr ) ) {
+        std::cout << "AdjustTokenPrivileges error:" << GetLastError ( ) << nl;
+        return false;
+    }
+    if ( GetLastError ( ) == ERROR_NOT_ALL_ASSIGNED ) {
+        std::cout << "The token does not have the specified privilege." << nl;
+        return false;
+    }
+    return true;
+}
+
+// https://stackoverflow.com/questions/251248/how-can-i-get-the-sid-of-the-current-windows-account#251267
+
 constexpr size_t page_size_in_bytes ( ) noexcept { return 65'536ull; }
 
 template<typename T>
@@ -102,6 +149,15 @@ struct windows_system {
         VirtualFree ( ptr_, static_cast<unsigned long> ( size_ ), MEM_DECOMMIT );
     }
 
+    static void_p reset_page ( void_p ptr_, size_t size_ ) noexcept {
+        return VirtualAlloc ( ptr_, static_cast<unsigned long> ( size_ ), MEM_RESET );
+    }
+
+    static void reset_undo_page ( void_p ptr_, size_t size_ ) noexcept {
+        VirtualFree ( ptr_, static_cast<unsigned long> ( size_ ), MEM_RESET_UNDO );
+    }
+
+    [[nodiscard]] size_t large_page_minimum ( ) noexcept { return GetLargePageMinimum ( ); }
     [[nodiscard]] static size_t virtual_page_size ( ) noexcept { return info.dwPageSize; }
     [[nodiscard]] static size_t virtual_size ( ) noexcept {
         return reinterpret_cast<char *> ( info.lpMaximumApplicationAddress ) -
@@ -123,9 +179,9 @@ struct windows_system {
     public:
     [[nodiscard]] static std::vector<void_p> heaps ( ) noexcept {
         void_p h[ 16u ];
-        size_t s = get_process_heaps ( 0u, NULL );
+        size_t s = get_process_heaps ( 0u, nullptr );
         while ( get_process_heaps ( s, h ) != s )
-            s = get_process_heaps ( 0u, NULL );
+            s = get_process_heaps ( 0u, nullptr );
         return { h, h + s };
     }
 
@@ -428,6 +484,11 @@ int main ( ) {
         for ( auto & v : vv )
             std::cout << v << ' ';
         std::cout << nl;
+
+        void * token = get_token_handle ( );
+        set_privilege ( token, SE_LOCK_MEMORY_NAME, true );
+
+        std::cout << GetLargePageMinimum ( ) << nl;
     }
     catch ( ... ) {
         eptr = std::current_exception ( ); // Capture.
@@ -437,6 +498,50 @@ int main ( ) {
     return EXIT_SUCCESS;
 }
 
+/*
+Windows http://www.roylongbottom.org.uk/busspd2k.zip
+
+ xx = (int *)VirtualAlloc(nullptr, useMemK*1024+256, MEM_COMMIT, PAGE_READWRITE);
+
+Linux http://www.roylongbottom.org.uk/memory_benchmarks.tar.gz
+
+#ifdef Bits64
+   array = (long long *)_mm_malloc(memoryKBytes[ipass-1]*1024, 16);
+#else
+   array = (int *)_mm_malloc(memoryKBytes[ipass-1]*1024, 16);
+
+Results and other links (MP version, Android) are in:
+
+http://www.roylongbottom.org.uk/busspd2k%20results.htm
+*/
+
+#include <boost/pfr/precise.hpp>
+
+struct some_person {
+    std::string name;
+    unsigned birth_year;
+};
+
+struct zip_functions {
+    template<typename U>
+    static U add ( U const & a, U const b ) {
+        return a + b;
+    }
+};
+
+template<typename InIt1, typename InIt2, typename OutIt, typename BinaryOperation>
+void zip ( InIt1 bin1, InIt1 ein1, InIt2 bin2, OutIt bout ) {
+    std::transform ( bin1, ein1, bin2, bout, BinaryOperation::add );
+}
+
+int main78768678 ( ) {
+    some_person val{ "Edgar Allan Poe", 1809 };
+
+    std::cout << boost::pfr::get<0> ( val )                           // No macro!
+              << " was born in " << boost::pfr::get<1> ( val ) << nl; // Works with any aggregate initializables!
+
+    return EXIT_SUCCESS;
+}
 #if 0
 
 template<typename Type>
