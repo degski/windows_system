@@ -69,9 +69,9 @@
     return token_handle;
 }
 
-[[nodiscard]] bool set_privilege ( void * token,                         // access token handle
-                                   wchar_t const * const privilege_name, // name of privilege to enable/disable
-                                   bool enable_privilige ) noexcept {    // to enable or disable privilege
+[[maybe_unused]] bool set_privilege ( void * token,                         // access token handle
+                                      wchar_t const * const privilege_name, // name of privilege to enable/disable
+                                      bool enable_privilige ) noexcept {    // to enable or disable privilege
     // https://docs.microsoft.com/en-us/windows/win32/secauthz/enabling-and-disabling-privileges-in-c--
     TOKEN_PRIVILEGES tp;
     LUID luid;
