@@ -567,45 +567,7 @@ void handleEptr ( std::exception_ptr eptr ) { // Passing by value is ok.
         std::cout << "Caught exception \"" << e.what ( ) << "\"\n";
     }
 }
-
-#include <immintrin.h>
-
-namespace sax {
-// dst and src must be 32-byte aligned.
-// size must be multiple of 32*2 = 64 bytes.
-inline void memcpy_avx ( void * dst, void const * src, size_t size ) noexcept {
-    // https://hero.handmade.network/forums/code-discussion/t/157-memory_bandwidth_+_implementing_memcpy
-    constexpr size_t stride = 2 * sizeof ( __m256i );
-    while ( size ) {
-        __m256i a = _mm256_load_si256 ( ( __m256i * ) src + 0 );
-        __m256i b = _mm256_load_si256 ( ( __m256i * ) src + 1 );
-        _mm256_stream_si256 ( ( __m256i * ) dst + 0, a );
-        _mm256_stream_si256 ( ( __m256i * ) dst + 1, b );
-        size -= stride;
-        src = reinterpret_cast<uint8_t const *> ( src ) + stride;
-        dst = reinterpret_cast<uint8_t *> ( dst ) + stride;
-    }
-}
-// dst and src must be 16-byte aligned
-// size must be multiple of 16*2 = 32 bytes
-inline void memcpy_sse ( void * dst, void const * src, size_t size ) noexcept {
-    size_t stride = 2 * sizeof ( __m128 );
-    while ( size ) {
-        __m128 a = _mm_load_ps ( ( float * ) ( reinterpret_cast<uint8_t const *> ( src ) + 0 * sizeof ( __m128 ) ) );
-        __m128 b = _mm_load_ps ( ( float * ) ( reinterpret_cast<uint8_t const *> ( src ) + 1 * sizeof ( __m128 ) ) );
-        _mm_stream_ps ( ( float * ) ( reinterpret_cast<uint8_t *> ( dst ) + 0 * sizeof ( __m128 ) ), a );
-        _mm_stream_ps ( ( float * ) ( reinterpret_cast<uint8_t *> ( dst ) + 1 * sizeof ( __m128 ) ), b );
-        size -= stride;
-        src = reinterpret_cast<uint8_t const *> ( src ) + stride;
-        dst = reinterpret_cast<uint8_t *> ( dst ) + stride;
-    }
-}
-
-// Pointer alignment.
-[[nodiscard]] static inline int pointer_alignment ( void * ptr_ ) noexcept {
-    return ( int ) ( ( std::uintptr_t ) ptr_ & ( std::uintptr_t ) - ( ( std::intptr_t ) ptr_ ) );
-}
-} // namespace sax
+#include <sax/stl.hpp>
 
 #include <plf/plf_nanotimer.h>
 
