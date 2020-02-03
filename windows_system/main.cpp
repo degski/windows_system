@@ -39,6 +39,7 @@
 #include <vector>
 #include <Windows.h>
 
+#include <sax/compressed_pair.hpp>
 #include <sax/stl.hpp>
 
 #include <plf/plf_nanotimer.h>
@@ -64,8 +65,7 @@ constexpr size_t type_page_size ( ) noexcept {
 template<typename SizeType = unsigned long>
 struct windows_system {
 
-    using size_type = typename std::make_unsigned<SizeType>::type;
-    using void_p    = void *;
+    using void_p = void *;
 
     static void_p m_reserved_ptr;
     static size_t m_reserved_size;
@@ -74,49 +74,58 @@ struct windows_system {
 
     ~windows_system ( ) noexcept {
         if ( m_reserved_ptr ) {
-            VirtualFree ( m_reserved_ptr, m_reserved_size * page_size_in_bytes ( ), MEM_RELEASE );
+            VirtualFree ( m_reserved_ptr, static_cast<unsigned long> ( m_reserved_size * page_size_in_bytes ( ) ), MEM_RELEASE );
             m_reserved_ptr  = nullptr;
             m_reserved_size = 0u;
         }
     }
 
     [[nodiscard]] static void_p reserve_pages ( size_t n_ ) noexcept {
-        m_reserved_ptr  = VirtualAlloc ( nullptr, n_ * page_size_in_bytes ( ), MEM_RESERVE, PAGE_NOACCESS );
+        m_reserved_ptr =
+            VirtualAlloc ( nullptr, static_cast<unsigned long> ( n_ * page_size_in_bytes ( ) ), MEM_RESERVE, PAGE_NOACCESS );
         m_reserved_size = n_;
         return m_reserved_ptr;
     }
 
     static void free_reserved_pages ( ) noexcept {
-        VirtualFree ( m_reserved_ptr, m_reserved_size * page_size_in_bytes ( ), MEM_RELEASE );
+        VirtualFree ( m_reserved_ptr, static_cast<unsigned long> ( m_reserved_size * page_size_in_bytes ( ) ), MEM_RELEASE );
         m_reserved_ptr  = nullptr;
         m_reserved_size = 0u;
     }
 
     public:
     static void_p commit_page ( void_p ptr_, size_t size_ ) noexcept {
-        return VirtualAlloc ( ptr_, size_, MEM_COMMIT, PAGE_READWRITE );
+        return VirtualAlloc ( ptr_, static_cast<unsigned long> ( size_ ), MEM_COMMIT, PAGE_READWRITE );
     }
 
-    static void decommit_page ( void_p ptr_, size_t size_ ) noexcept { VirtualFree ( ptr_, size_, MEM_DECOMMIT ); }
-
-    [[nodiscard]] static size_type virtual_page_size ( ) noexcept { return windows_system::info.dwPageSize; }
-    [[nodiscard]] static size_type virtual_size ( ) noexcept {
-        return reinterpret_cast<char *> ( windows_system::info.lpMaximumApplicationAddress ) -
-               reinterpret_cast<char *> ( windows_system::info.lpMinimumApplicationAddress );
+    static void decommit_page ( void_p ptr_, size_t size_ ) noexcept {
+        VirtualFree ( ptr_, static_cast<unsigned long> ( size_ ), MEM_DECOMMIT );
     }
-    [[nodiscard]] static size_type granularity ( ) noexcept { return windows_system::info.dwAllocationGranularity; }
-    [[nodiscard]] static std::pair<void_p, void_p> application_memory_bounds ( ) noexcept {
-        return { windows_system::info.lpMinimumApplicationAddress, windows_system::info.lpMaximumApplicationAddress };
+
+    [[nodiscard]] static size_t virtual_page_size ( ) noexcept { return info.dwPageSize; }
+    [[nodiscard]] static size_t virtual_size ( ) noexcept {
+        return reinterpret_cast<char *> ( info.lpMaximumApplicationAddress ) -
+               reinterpret_cast<char *> ( info.lpMinimumApplicationAddress );
     }
-    [[nodiscard]] static size_type number_virtual_cores ( ) noexcept { return windows_system::info.dwNumberOfProcessors; }
+    [[nodiscard]] static size_t granularity ( ) noexcept { return info.dwAllocationGranularity; }
+    [[nodiscard]] static sax::pair<void_p, void_p> application_memory_bounds ( ) noexcept {
+        return { info.lpMinimumApplicationAddress, info.lpMaximumApplicationAddress };
+    }
+    [[nodiscard]] static size_t number_virtual_cores ( ) noexcept { return info.dwNumberOfProcessors; }
 
-    static void update ( ) noexcept { windows_system::info = get_system_information ( ); }
+    static void update ( ) noexcept { info = get_system_information ( ); }
 
+    private:
+    [[nodiscard]] static size_t get_process_heaps ( size_t const & s_, void_p const & p_ ) noexcept {
+        return static_cast<size_t> ( GetProcessHeaps ( s_, p_ ) );
+    }
+
+    public:
     [[nodiscard]] static std::vector<void_p> heaps ( ) noexcept {
-        void_p h[ 16 ];
-        size_type s = GetProcessHeaps ( 0, NULL );
-        while ( GetProcessHeaps ( s, h ) != s )
-            s = GetProcessHeaps ( 0, NULL );
+        void_p h[ 16u ];
+        size_t s = get_process_heaps ( 0u, NULL );
+        while ( get_process_heaps ( s, h ) != s )
+            s = get_process_heaps ( 0u, NULL );
         return { h, h + s };
     }
 
