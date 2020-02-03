@@ -269,11 +269,11 @@ struct virtual_vector {
 
     // Tear down committed.
     void tear_down_committed ( size_type const to_commit_size_in_bytes_ = 0u ) noexcept {
-        size_type committed          = GrowthPolicy::shrink ( committed );
-        pointer rbegin               = m_begin + committed;
+        size_type com                = GrowthPolicy::shrink ( committed ( ) );
+        pointer rbegin               = m_begin + com;
         size_type const to_committed = std::max ( page_size_in_bytes ( ), to_commit_size_in_bytes_ );
-        for ( ; to_committed == committed; committed = GrowthPolicy::shrink ( committed ), rbegin -= committed )
-            sys::decommit_page ( rbegin, committed );
+        for ( ; to_committed == com; com = GrowthPolicy::shrink ( com ), rbegin -= com )
+            sys::decommit_page ( rbegin, com );
         if ( not to_commit_size_in_bytes_ )
             sys::decommit_page ( m_begin, page_size_in_bytes ( ) );
     }
