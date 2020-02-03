@@ -202,10 +202,11 @@ struct virtual_vector {
     virtual_vector ( ) noexcept = default;
 
     private:
-    void first_commit_impl ( size_type const & committed_in_bytes_ ) {
+    void first_commit_impl ( ) {
         m_committed_in_bytes = page_size_in_bytes ( );
-        m_end = m_begin = reinterpret_cast<pointer> ( sys::commit_page (
-            reinterpret_cast<pointer> ( sys::reserve_pages ( Capacity / type_page_size<value_type> ( ) ) ), committed_in_bytes_ ) );
+        m_end = m_begin = reinterpret_cast<pointer> (
+            sys::commit_page ( reinterpret_cast<pointer> ( sys::reserve_pages ( Capacity / type_page_size<value_type> ( ) ) ),
+                               m_committed_in_bytes ) );
     }
 
     public:
@@ -320,7 +321,7 @@ struct virtual_vector {
             }
         }
         else {
-            first_commit_impl ( m_committed_in_bytes );
+            first_commit_impl ( );
         }
         return *new ( m_end++ ) value_type{ std::forward<Args> ( value_ )... };
     }
