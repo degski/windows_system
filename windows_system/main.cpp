@@ -106,8 +106,11 @@ struct windows_system {
 
     using void_p = void *;
 
+    private:
     static void_p m_reserved_ptr;
     static size_t m_reserved_size;
+
+    public:
     static size_t const page_size_in_bytes;
 
     // 2'097'152
