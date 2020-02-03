@@ -202,8 +202,8 @@ struct virtual_vector {
     virtual_vector ( ) noexcept = default;
 
     private:
-    void first_commit_impl ( ) {
-        m_committed_in_bytes = page_size_in_bytes ( );
+    void first_commit_impl ( size_type page_size_in_bytes_ = 0u ) {
+        m_committed_in_bytes = page_size_in_bytes_ ? page_size_in_bytes_ : page_size_in_bytes ( );
         m_end = m_begin = reinterpret_cast<pointer> (
             sys::commit_page ( reinterpret_cast<pointer> ( sys::reserve_pages ( Capacity / type_page_size<value_type> ( ) ) ),
                                m_committed_in_bytes ) );
@@ -281,7 +281,7 @@ struct virtual_vector {
 
     void clear_impl ( ) noexcept {
         if ( m_committed_in_bytes ) {
-            // Destroy object.
+            // Destroy objects.
             if constexpr ( not std::is_scalar<value_type>::value ) {
                 for ( auto & v : *this )
                     v.~value_type ( );
@@ -298,6 +298,8 @@ struct virtual_vector {
         m_committed_in_bytes = 0u;
     }
 
+    // Size.
+
     private:
     [[nodiscard]] static constexpr size_type capacity_in_bytes ( ) noexcept { return Capacity * type_page_size<value_type> ( ); }
     // m_committed_in_bytes is a variable.
@@ -311,6 +313,8 @@ struct virtual_vector {
     [[nodiscard]] size_type size ( ) const noexcept { return size_in_bytes ( ) / sizeof ( value_type ); }
 
     [[nodiscard]] static constexpr size_type max_size ( ) noexcept { return capacity ( ); }
+
+    // Add.
 
     template<typename... Args>
     reference emplace_back ( Args &&... value_ ) noexcept {
@@ -332,6 +336,8 @@ struct virtual_vector {
 
     // TODO lowering growth factor when vector becomes really large as compared to free memory.
     // TODO virtual_queue
+
+    // Data.
 
     [[nodiscard]] const_pointer data ( ) const noexcept { return reinterpret_cast<pointer> ( m_begin ); }
     [[nodiscard]] pointer data ( ) noexcept { return const_cast<pointer> ( std::as_const ( *this ).data ( ) ); }
