@@ -39,6 +39,10 @@
 #include <vector>
 #include <Windows.h>
 
+#include <sax/stl.hpp>
+
+#include <plf/plf_nanotimer.h>
+
 // extern unsigned long __declspec( dllimport ) __stdcall GetProcessHeaps ( unsigned long NumberOfHeaps, void ** ProcessHeaps );
 // extern __declspec( dllimport ) void * __stdcall GetProcessHeap ( );
 
@@ -482,36 +486,9 @@ struct virtual_vector {
         return emplace_back ( value_type{ std::forward<Args> ( value_ )... } );
     }
 
-    // TODO vectorized std::copy.
     // TODO lowering growth factor when vector becomes really large as compared to free memory.
     // TODO virtual_queue
 
-    /*
-    template<typename Pair>
-    struct map_comaparator {
-        bool operator( ) ( Pair const & a, Pair const & b ) const noexcept { return a.first < b.first; }
-    };
-    iterator binary_find ( key_type const & key_ ) const noexcept {
-        auto first = std::lower_bound ( begin ( ), end ( ), key_, map_comaparator<key_value_type> ( ) );
-        return first != end ( ) and not map_comaparator<key_value_type> ( key_, *first ) ? first : end ( );
-    }
-    iterator linear_lowerbound ( key_type const & key ) const noexcept {
-        for ( key_value_type const & kv : *this )
-            if ( kv.first >= key )
-                return std::addressof ( kv );
-        return end ( );
-    };
-    iterator linear_find ( key_type const & key_ ) const noexcept {
-        auto first = linear_lowerbound ( key_ );
-        return first != end ( ) and key_ == *first ? first : end ( );
-    }
-    iterator find ( value_type const & val_ ) const noexcept {
-        for ( key_value_type const & kv : *this )
-            if ( kv.second == val_ )
-                return std::addressof ( kv );
-        return end ( );
-    }
-    */
     [[nodiscard]] const_pointer data ( ) const noexcept { return reinterpret_cast<pointer> ( m_begin ); }
     [[nodiscard]] pointer data ( ) noexcept { return const_cast<pointer> ( std::as_const ( *this ).data ( ) ); }
 
@@ -567,83 +544,13 @@ void handleEptr ( std::exception_ptr eptr ) { // Passing by value is ok.
         std::cout << "Caught exception \"" << e.what ( ) << "\"\n";
     }
 }
-#include <sax/stl.hpp>
 
-#include <plf/plf_nanotimer.h>
-
-#if 0
-#    define mc sax::memcpy_avx
-
-#else
-#    define mc sax::memcpy_sse
-#endif
 int main ( ) {
 
     std::exception_ptr eptr;
 
     try {
 
-        constexpr size_t size = 65536 * 2048;
-
-        char * a = reinterpret_cast<char *> ( _aligned_malloc ( size, 32 ) );
-        char * b = reinterpret_cast<char *> ( _aligned_malloc ( size, 32 ) );
-
-        for ( int i = 0; i < size; ++i ) {
-            a[ i ] = 123;
-            b[ i ] = 0;
-        }
-
-        plf::nanotimer t;
-
-        t.start ( );
-        mc ( b, a, size );
-        auto r = t.get_elapsed_ms ( );
-
-        std::cout << ( size_t ) r << " ms " << ( int ) b[ 1024 * 1024 - 1 ] << nl;
-
-        for ( int i = 0; i < size; ++i )
-            b[ i ] = 0;
-
-        t.start ( );
-        mc ( b, a, size );
-        r = t.get_elapsed_ms ( );
-
-        std::cout << ( size_t ) r << " ms " << ( int ) b[ 1024 * 1024 - 1 ] << nl;
-
-        for ( int i = 0; i < size; ++i )
-            b[ i ] = 0;
-
-        mc ( b, a, size );
-        r = t.get_elapsed_ms ( );
-
-        std::cout << ( size_t ) r << " ms " << ( int ) b[ 1024 * 1024 - 1 ] << nl;
-
-        for ( int i = 0; i < size; ++i )
-            b[ i ] = 0;
-
-        t.start ( );
-        mc ( b, a, size );
-        r = t.get_elapsed_ms ( );
-
-        std::cout << ( size_t ) r << " ms " << ( int ) b[ 1024 * 1024 - 1 ] << nl;
-
-        exit ( 0 );
-
-        /*
-        void * r1 = sys::commit_page ( sys::reserve_pages ( 1'000'000 ).ptr, 1 * page_size_in_bytes ( ) );
-
-        void * r2 = sys::commit_page ( reinterpret_cast<int *> ( r1 ) + 1 * type_page_size<int> ( ), 1 * page_size_in_bytes ( )
-        );
-
-        void * r3 = sys::commit_page ( reinterpret_cast<int *> ( r1 ) + 2 * type_page_size<int> ( ), 2 * page_size_in_bytes ( )
-        );
-
-        std::span<int> vvv{ reinterpret_cast<int *> ( r1 ), 4 * type_page_size<int> ( ) };
-
-        int i = 0;
-        for ( auto & v : vvv )
-            new ( std::addressof ( v ) ) int{ i++ };
-        */
         virtual_vector<int, size_t, 1'000'000> vv;
 
         for ( int i = 0; i < 16'384; ++i )
