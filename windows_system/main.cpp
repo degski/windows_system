@@ -87,21 +87,22 @@ struct windows_system {
         set_privilege ( get_token_handle ( ), SE_LOCK_MEMORY_NAME, false );
     }
 
-    [[nodiscard]] static void_p reserve_pages ( size_t n_ ) noexcept {
+    [[nodiscard]] static void_p reserve_and_commit_page ( size_t const n_ ) noexcept {
         if ( not set_privilege ( get_token_handle ( ), SE_LOCK_MEMORY_NAME, true ) ) {
             std::cout << "Could not set lock page privilege to enabled." << nl;
             return nullptr;
         }
-        if constexpr ( HAVE_LARGE_PAGES ) {
-            // The page has to be reserved and committed at the same time.
-            m_reserved_ptr = VirtualAlloc ( nullptr, static_cast<unsigned long> ( n_ * page_size_in_bytes ),
-                                            MEM_RESERVE | MEM_COMMIT | MEM_LARGE_PAGES, PAGE_READWRITE );
+        if ( not HAVE_LARGE_PAGES ) {
+            m_reserved_ptr = VirtualAlloc (
+                VirtualAlloc ( nullptr, static_cast<unsigned long> ( n_ * page_size_in_bytes ), MEM_RESERVE, PAGE_READWRITE ),
+                static_cast<unsigned long> ( page_size_in_bytes ), MEM_COMMIT, PAGE_READWRITE );
+            m_reserved_size = n_;
         }
         else {
-            m_reserved_ptr =
-                VirtualAlloc ( nullptr, static_cast<unsigned long> ( n_ * page_size_in_bytes ), MEM_RESERVE, PAGE_NOACCESS );
+            m_reserved_ptr  = VirtualAlloc ( nullptr, static_cast<unsigned long> ( n_ * page_size_in_bytes ),
+                                            MEM_RESERVE | MEM_COMMIT | MEM_LARGE_PAGES, PAGE_READWRITE );
+            m_reserved_size = 1; // ? maybe m_reserved_size in bytes, or just constexpr if-it into shape
         }
-        m_reserved_size = n_;
         return m_reserved_ptr;
     }
 
@@ -154,17 +155,12 @@ struct windows_system {
 
     static void update ( ) noexcept { info = get_system_information ( ); }
 
-    private:
-    [[nodiscard]] static size_t get_process_heaps ( size_t const & s_, void_p const & p_ ) noexcept {
-        return static_cast<size_t> ( GetProcessHeaps ( s_, p_ ) );
-    }
-
-    public:
+    // Get all heaps.
     [[nodiscard]] static std::vector<void_p> heaps ( ) noexcept {
         void_p h[ 16u ];
-        size_t s = get_process_heaps ( 0u, nullptr );
-        while ( get_process_heaps ( s, h ) != s )
-            s = get_process_heaps ( 0u, nullptr );
+        size_t s = static_cast<size_t> ( GetProcessHeaps ( 0u, nullptr ) );
+        while ( static_cast<size_t> ( GetProcessHeaps ( s, h ) ) != s )
+            s = static_cast<size_t> ( GetProcessHeaps ( 0u, nullptr ) );
         return { h, h + s };
     }
 
@@ -294,16 +290,17 @@ struct virtual_vector {
     private:
     void first_commit_impl ( size_type page_size_in_bytes_ = 0u ) {
         m_committed_in_bytes = page_size_in_bytes_ ? page_size_in_bytes_ : sys::page_size_in_bytes;
-        m_end = m_begin = reinterpret_cast<pointer> (
-            sys::commit_page ( reinterpret_cast<pointer> ( sys::reserve_pages ( Capacity / sys::type_page_size<value_type> ( ) ) ),
-                               m_committed_in_bytes ) );
+        m_end                = m_begin =
+            reinterpret_cast<pointer> ( sys::reserve_and_commit_page ( Capacity / sys::type_page_size<value_type> ( ) ) );
     }
 
     public:
     virtual_vector ( virtual_vector const & vv_ ) {
         first_commit_impl ( vv_.m_committed_in_bytes );
+        // todo set up space in this.
         if constexpr ( not std::is_scalar<value_type>::value ) {
-            std::memcpy ( m_begin, vv_.m_begin, vv_.m_end - vv_.begin );
+            // std::memcpy ( m_begin, vv_.m_begin, vv_.m_end - vv_.begin );
+            sax::memcpy_sse ( m_begin, vv_.m_begin, vv_.m_committed_in_bytes );
         }
         else {
             for ( auto const & v : vv_ )
