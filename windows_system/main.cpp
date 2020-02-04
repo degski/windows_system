@@ -121,16 +121,16 @@ struct windows_system {
     }
     template<bool HLP = HAVE_LARGE_PAGES, typename = std::enable_if_t<not HLP>>
     static void decommit_page ( void_p ptr_, size_t size_ ) noexcept {
-        VirtualFree ( ptr_, size_, MEM_DECOMMIT );
+        VirtualAlloc ( ptr_, size_, MEM_DECOMMIT, PAGE_NOACCESS );
     }
 
     template<bool HLP = HAVE_LARGE_PAGES, typename = std::enable_if_t<not HLP>>
     static void_p reset_page ( void_p ptr_, size_t size_ ) noexcept {
-        return VirtualAlloc ( ptr_, size_, MEM_RESET );
+        return VirtualAlloc ( ptr_, size_, MEM_RESET, PAGE_NOACCESS );
     }
     template<bool HLP = HAVE_LARGE_PAGES, typename = std::enable_if_t<not HLP>>
     static void reset_undo_page ( void_p ptr_, size_t size_ ) noexcept {
-        VirtualFree ( ptr_, size_, MEM_RESET_UNDO );
+        VirtualAlloc ( ptr_, size_, MEM_RESET_UNDO, PAGE_READWRITE );
     }
 
     template<typename T>
@@ -156,9 +156,9 @@ struct windows_system {
     // Get all heaps.
     [[nodiscard]] static std::vector<void_p> heaps ( ) noexcept {
         void_p h[ 16u ];
-        size_t s = static_cast<size_t> ( GetProcessHeaps ( 0u, nullptr ) );
-        while ( static_cast<size_t> ( GetProcessHeaps ( s, h ) ) != s )
-            s = static_cast<size_t> ( GetProcessHeaps ( 0u, nullptr ) );
+        unsigned long s = GetProcessHeaps ( 0u, nullptr );
+        while ( GetProcessHeaps ( s, h ) != s )
+            s = GetProcessHeaps ( 0u, nullptr );
         return { h, h + s };
     }
 
@@ -297,7 +297,7 @@ struct virtual_vector {
         // todo set up space in this.
         if constexpr ( not std::is_scalar<value_type>::value ) {
             // std::memcpy ( m_begin, vv_.m_begin, vv_.m_end - vv_.begin );
-            sax::memcpy_sse ( m_begin, vv_.m_begin, vv_.m_committed_in_bytes );
+            sax::memcpy_sse_16 ( m_begin, vv_.m_begin, vv_.m_committed_in_bytes );
         }
         else {
             for ( auto const & v : vv_ )
@@ -479,7 +479,42 @@ void handleEptr ( std::exception_ptr eptr ) { // Passing by value is ok.
     }
 }
 
+template<typename T, size_t S>
+using heap_array = std::array<T, S>;
+
+template<typename T, size_t S>
+using heap_array_ptr = std::unique_ptr<heap_array<T, S>>;
+
 int main ( ) {
+
+    std::exception_ptr eptr;
+
+    try {
+        constexpr size_t s = 1024 * 1024;
+        std::unique_ptr<int> v1 ( ( int * ) std::malloc ( s * sizeof ( int ) ) );
+        std::unique_ptr<int> v2 ( ( int * ) std::malloc ( s * sizeof ( int ) ) );
+
+        std::fill ( v1.get ( ), v1.get ( ) + s * sizeof ( int ), 123456789 );
+        std::fill ( v2.get ( ), v2.get ( ) + s * sizeof ( int ), 0 );
+
+        plf::nanotimer t;
+        t.start ( );
+        for ( int c = 0; c < 1'000'000; ++c )
+            sax::memcpy_sse_16 ( v2.get ( ), v1.get ( ), s * sizeof ( int ) );
+
+        std::uint64_t time = static_cast<std::uint64_t> ( t.get_elapsed_ms ( ) );
+
+        std::cout << v2.get ( )[ s - 100 ] << " " << time << " ms" << nl;
+    }
+    catch ( ... ) {
+        eptr = std::current_exception ( ); // Capture.
+    }
+    handleEptr ( eptr );
+
+    return EXIT_SUCCESS;
+}
+
+int main769878 ( ) {
 
     std::exception_ptr eptr;
 
