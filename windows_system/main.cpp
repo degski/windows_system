@@ -59,49 +59,9 @@
 
 #pragma comment( lib, "Advapi32.lib" )
 
-[[nodiscard]] void * get_token_handle ( ) noexcept {
-    void * token_handle = nullptr;
-    OpenThreadToken ( GetCurrentThread ( ), TOKEN_ADJUST_PRIVILEGES, false, &token_handle );
-    if ( GetLastError ( ) == ERROR_NO_TOKEN ) {
-        if ( not OpenProcessToken ( GetCurrentProcess ( ), TOKEN_ADJUST_PRIVILEGES, &token_handle ) )
-            std::cout << "OpenProcessToken error:" << GetLastError ( ) << nl;
-    }
-    return token_handle;
-}
-
-[[maybe_unused]] bool set_privilege ( void * token,                         // access token handle
-                                      wchar_t const * const privilege_name, // name of privilege to enable/disable
-                                      bool enable_privilige ) noexcept {    // to enable or disable privilege
-    // https://docs.microsoft.com/en-us/windows/win32/secauthz/enabling-and-disabling-privileges-in-c--
-    TOKEN_PRIVILEGES tp;
-    LUID luid;
-    if ( not LookupPrivilegeValue ( nullptr,        // lookup privilege on local system
-                                    privilege_name, // privilege to lookup
-                                    &luid ) ) {     // receives LUID of privilege
-        std::cout << "LookupPrivilegeValue error: " << GetLastError ( ) << nl;
-        return false;
-    }
-    tp.PrivilegeCount       = 1;
-    tp.Privileges[ 0 ].Luid = luid;
-    if ( enable_privilige )
-        tp.Privileges[ 0 ].Attributes = SE_PRIVILEGE_ENABLED;
-    else
-        tp.Privileges[ 0 ].Attributes = 0;
-    // Enable the privilege or disable all privileges.
-    if ( not AdjustTokenPrivileges ( token, false, &tp, sizeof ( TOKEN_PRIVILEGES ), nullptr, nullptr ) ) {
-        std::cout << "AdjustTokenPrivileges error:" << GetLastError ( ) << nl;
-        return false;
-    }
-    if ( GetLastError ( ) == ERROR_NOT_ALL_ASSIGNED ) {
-        std::cout << "The token does not have the specified privilege." << nl;
-        return false;
-    }
-    return true;
-}
-
 // https://stackoverflow.com/questions/251248/how-can-i-get-the-sid-of-the-current-windows-account#251267
 
-template<bool have_large_pages = false>
+template<bool HAVE_LARGE_PAGES = false>
 struct windows_system {
 
     using void_p = void *;
@@ -113,57 +73,74 @@ struct windows_system {
     public:
     static size_t const page_size_in_bytes;
 
-    // 2'097'152
+    // 2'097'152 = 200MB = 2 ^ 21
+    //    65'536 =  64KB = 2 ^ 16
+
+    windows_system ( ) = delete;
+
+    ~windows_system ( ) noexcept {
+        if ( m_reserved_ptr ) {
+            VirtualFree ( m_reserved_ptr, static_cast<unsigned long> ( m_reserved_size * page_size_in_bytes ), MEM_RELEASE );
+            m_reserved_ptr  = nullptr;
+            m_reserved_size = 0u;
+        }
+        set_privilege ( get_token_handle ( ), SE_LOCK_MEMORY_NAME, false );
+    }
+
+    [[nodiscard]] static void_p reserve_pages ( size_t n_ ) noexcept {
+        if ( not set_privilege ( get_token_handle ( ), SE_LOCK_MEMORY_NAME, true ) ) {
+            std::cout << "Could not set lock page privilege to enabled." << nl;
+            return nullptr;
+        }
+        if constexpr ( HAVE_LARGE_PAGES ) {
+            // The page has to be reserved and committed at the same time.
+            m_reserved_ptr = VirtualAlloc ( nullptr, static_cast<unsigned long> ( n_ * page_size_in_bytes ),
+                                            MEM_RESERVE | MEM_COMMIT | MEM_LARGE_PAGES, PAGE_READWRITE );
+        }
+        else {
+            m_reserved_ptr =
+                VirtualAlloc ( nullptr, static_cast<unsigned long> ( n_ * page_size_in_bytes ), MEM_RESERVE, PAGE_NOACCESS );
+        }
+        m_reserved_size = n_;
+        return m_reserved_ptr;
+    }
+
+    static void free_reserved_pages ( ) noexcept {
+        if constexpr ( not HAVE_LARGE_PAGES ) {
+            VirtualFree ( m_reserved_ptr, static_cast<unsigned long> ( m_reserved_size * page_size_in_bytes ), MEM_RELEASE );
+            m_reserved_ptr  = nullptr;
+            m_reserved_size = 0u;
+        }
+        else {
+            // null op.
+        }
+    }
+
+    template<bool HLP = HAVE_LARGE_PAGES, typename = std::enable_if_t<not HLP>>
+    static void_p commit_page ( void_p ptr_, size_t size_ ) noexcept {
+        return VirtualAlloc ( ptr_, static_cast<unsigned long> ( size_ ), MEM_COMMIT, PAGE_READWRITE );
+    }
+    template<bool HLP = HAVE_LARGE_PAGES, typename = std::enable_if_t<not HLP>>
+    static void decommit_page ( void_p ptr_, size_t size_ ) noexcept {
+        VirtualFree ( ptr_, static_cast<unsigned long> ( size_ ), MEM_DECOMMIT );
+    }
+
+    template<bool HLP = HAVE_LARGE_PAGES, typename = std::enable_if_t<not HLP>>
+    static void_p reset_page ( void_p ptr_, size_t size_ ) noexcept {
+        return VirtualAlloc ( ptr_, static_cast<unsigned long> ( size_ ), MEM_RESET );
+    }
+    template<bool HLP = HAVE_LARGE_PAGES, typename = std::enable_if_t<not HLP>>
+    static void reset_undo_page ( void_p ptr_, size_t size_ ) noexcept {
+        VirtualFree ( ptr_, static_cast<unsigned long> ( size_ ), MEM_RESET_UNDO );
+    }
+
     template<typename T>
     static constexpr size_t type_page_size ( size_t large_page_size_ = 0u ) noexcept {
         assert ( ( page_size_in_bytes / sizeof ( T ) ) * sizeof ( T ) == page_size_in_bytes );
         return page_size_in_bytes / sizeof ( T );
     }
 
-    windows_system ( ) = delete;
-
-    ~windows_system ( ) noexcept {
-        if ( m_reserved_ptr ) {
-            VirtualFree ( m_reserved_ptr, static_cast<unsigned long> ( m_reserved_size * page_size_in_bytes ),
-                          MEM_RELEASE | ( have_large_pages ? MEM_LARGE_PAGES : 0u ) );
-            m_reserved_ptr  = nullptr;
-            m_reserved_size = 0u;
-        }
-    }
-
-    [[nodiscard]] static void_p reserve_pages ( size_t n_ ) noexcept {
-        m_reserved_ptr  = VirtualAlloc ( nullptr, static_cast<unsigned long> ( n_ * page_size_in_bytes ),
-                                        MEM_RESERVE | ( have_large_pages ? MEM_LARGE_PAGES : 0u ), PAGE_NOACCESS );
-        m_reserved_size = n_;
-        return m_reserved_ptr;
-    }
-
-    static void free_reserved_pages ( ) noexcept {
-        VirtualFree ( m_reserved_ptr, static_cast<unsigned long> ( m_reserved_size * page_size_in_bytes ),
-                      MEM_RELEASE | ( have_large_pages ? MEM_LARGE_PAGES : 0u ) );
-        m_reserved_ptr  = nullptr;
-        m_reserved_size = 0u;
-    }
-
-    public:
-    static void_p commit_page ( void_p ptr_, size_t size_ ) noexcept {
-        return VirtualAlloc ( ptr_, static_cast<unsigned long> ( size_ ), MEM_COMMIT | ( have_large_pages ? MEM_LARGE_PAGES : 0u ),
-                              PAGE_READWRITE );
-    }
-
-    static void decommit_page ( void_p ptr_, size_t size_ ) noexcept {
-        VirtualFree ( ptr_, static_cast<unsigned long> ( size_ ), MEM_DECOMMIT | ( have_large_pages ? MEM_LARGE_PAGES : 0u ) );
-    }
-
-    static void_p reset_page ( void_p ptr_, size_t size_ ) noexcept {
-        return VirtualAlloc ( ptr_, static_cast<unsigned long> ( size_ ), MEM_RESET | ( have_large_pages ? MEM_LARGE_PAGES : 0u ) );
-    }
-
-    static void reset_undo_page ( void_p ptr_, size_t size_ ) noexcept {
-        VirtualFree ( ptr_, static_cast<unsigned long> ( size_ ), MEM_RESET_UNDO | ( have_large_pages ? MEM_LARGE_PAGES : 0u ) );
-    }
-
-    [[nodiscard]] size_t large_page_minimum ( ) noexcept { return GetLargePageMinimum ( ); }
+    [[nodiscard]] static size_t large_page_minimum ( ) noexcept { return GetLargePageMinimum ( ); }
     [[nodiscard]] static size_t virtual_page_size ( ) noexcept { return info.dwPageSize; }
     [[nodiscard]] static size_t virtual_size ( ) noexcept {
         return reinterpret_cast<char *> ( info.lpMaximumApplicationAddress ) -
@@ -205,8 +182,48 @@ struct windows_system {
     static SYSTEM_INFO get_system_information ( ) noexcept {
         assert ( virtual_page_size ( ) == std::numeric_limits<std::uint16_t>::max ( ) );
         SYSTEM_INFO si;
-        GetSystemInfo ( &si );
+        GetSystemInfo ( std::addressof ( si ) );
         return si;
+    }
+
+    [[nodiscard]] static void * get_token_handle ( ) {
+        void * token_handle = nullptr;
+        OpenThreadToken ( GetCurrentThread ( ), TOKEN_ADJUST_PRIVILEGES, false, std::addressof ( token_handle ) );
+        if ( GetLastError ( ) == ERROR_NO_TOKEN ) {
+            if ( not OpenProcessToken ( GetCurrentProcess ( ), TOKEN_ADJUST_PRIVILEGES, std::addressof ( token_handle ) ) )
+                std::cout << "OpenProcessToken error:" << GetLastError ( ) << nl;
+        }
+        return token_handle;
+    }
+
+    [[maybe_unused]] static bool set_privilege ( void * token,                         // access token handle
+                                                 wchar_t const * const privilege_name, // name of privilege to enable/disable
+                                                 bool enable_privilige ) noexcept {    // to enable or disable privilege
+        // https://docs.microsoft.com/en-us/windows/win32/secauthz/enabling-and-disabling-privileges-in-c--
+        TOKEN_PRIVILEGES tp;
+        LUID luid;
+        if ( not LookupPrivilegeValue ( nullptr,                      // lookup privilege on local system
+                                        privilege_name,               // privilege to lookup
+                                        std::addressof ( luid ) ) ) { // receives LUID of privilege
+            std::cout << "LookupPrivilegeValue error: " << GetLastError ( ) << nl;
+            return false;
+        }
+        tp.PrivilegeCount       = 1;
+        tp.Privileges[ 0 ].Luid = luid;
+        if ( enable_privilige )
+            tp.Privileges[ 0 ].Attributes = SE_PRIVILEGE_ENABLED;
+        else
+            tp.Privileges[ 0 ].Attributes = 0;
+        // Enable the privilege or disable all privileges.
+        if ( not AdjustTokenPrivileges ( token, false, std::addressof ( tp ), sizeof ( TOKEN_PRIVILEGES ), nullptr, nullptr ) ) {
+            std::cout << "AdjustTokenPrivileges error:" << GetLastError ( ) << nl;
+            return false;
+        }
+        if ( GetLastError ( ) == ERROR_NOT_ALL_ASSIGNED ) {
+            std::cout << "The token does not have the specified privilege." << nl;
+            return false;
+        }
+        return true;
     }
 
     //
@@ -231,15 +248,15 @@ struct windows_system {
     //
 };
 
-template<bool have_large_pages>
-void * windows_system<have_large_pages>::m_reserved_ptr = nullptr;
-template<bool have_large_pages>
-size_t windows_system<have_large_pages>::m_reserved_size = 0u;
-template<bool have_large_pages>
-size_t const windows_system<have_large_pages>::page_size_in_bytes = have_large_pages ? GetLargePageMinimum ( ) : 65'536ull;
+template<bool HAVE_LARGE_PAGES>
+void * windows_system<HAVE_LARGE_PAGES>::m_reserved_ptr = nullptr;
+template<bool HAVE_LARGE_PAGES>
+size_t windows_system<HAVE_LARGE_PAGES>::m_reserved_size = 0u;
+template<bool HAVE_LARGE_PAGES>
+size_t const windows_system<HAVE_LARGE_PAGES>::page_size_in_bytes = HAVE_LARGE_PAGES ? large_page_minimum ( ) : 65'536ull;
 
-template<bool have_large_pages>
-SYSTEM_INFO windows_system<have_large_pages>::info = get_system_information ( );
+template<bool HAVE_LARGE_PAGES>
+SYSTEM_INFO windows_system<HAVE_LARGE_PAGES>::info = get_system_information ( );
 
 using sys = windows_system<false>;
 
@@ -492,11 +509,6 @@ int main ( ) {
         for ( auto & v : vv )
             std::cout << v << ' ';
         std::cout << nl;
-
-        void * token = get_token_handle ( );
-        set_privilege ( token, SE_LOCK_MEMORY_NAME, true );
-
-        std::cout << GetLargePageMinimum ( ) << nl;
     }
     catch ( ... ) {
         eptr = std::current_exception ( ); // Capture.
