@@ -67,8 +67,8 @@ struct windows_system {
     using void_p = void *;
 
     private:
-    static void_p m_reserved_ptr;
-    static size_t m_reserved_size;
+    static void_p m_reserved_pointer;
+    static size_t m_reserved_size_in_bytes;
 
     public:
     static size_t const page_size_in_bytes;
@@ -79,38 +79,36 @@ struct windows_system {
     windows_system ( ) = delete;
 
     ~windows_system ( ) noexcept {
-        if ( m_reserved_ptr ) {
-            VirtualFree ( m_reserved_ptr, static_cast<unsigned long> ( m_reserved_size * page_size_in_bytes ), MEM_RELEASE );
-            m_reserved_ptr  = nullptr;
-            m_reserved_size = 0u;
+        if ( m_reserved_pointer ) {
+            VirtualFree ( m_reserved_pointer, m_reserved_size_in_bytes, MEM_RELEASE );
+            m_reserved_pointer       = nullptr;
+            m_reserved_size_in_bytes = 0u;
         }
         set_privilege ( get_token_handle ( ), SE_LOCK_MEMORY_NAME, false );
     }
 
-    [[nodiscard]] static void_p reserve_and_commit_page ( size_t const n_ ) noexcept {
+    [[nodiscard]] static void_p reserve_and_commit_page ( size_t const capacity_in_bytes_ ) noexcept {
         if ( not set_privilege ( get_token_handle ( ), SE_LOCK_MEMORY_NAME, true ) ) {
             std::cout << "Could not set lock page privilege to enabled." << nl;
             return nullptr;
         }
-        if ( not HAVE_LARGE_PAGES ) {
-            m_reserved_ptr = VirtualAlloc (
-                VirtualAlloc ( nullptr, static_cast<unsigned long> ( n_ * page_size_in_bytes ), MEM_RESERVE, PAGE_READWRITE ),
-                static_cast<unsigned long> ( page_size_in_bytes ), MEM_COMMIT, PAGE_READWRITE );
-            m_reserved_size = n_;
+        if ( HAVE_LARGE_PAGES ) {
+            m_reserved_pointer =
+                VirtualAlloc ( nullptr, capacity_in_bytes_, MEM_RESERVE | MEM_COMMIT | MEM_LARGE_PAGES, PAGE_READWRITE );
         }
         else {
-            m_reserved_ptr  = VirtualAlloc ( nullptr, static_cast<unsigned long> ( n_ * page_size_in_bytes ),
-                                            MEM_RESERVE | MEM_COMMIT | MEM_LARGE_PAGES, PAGE_READWRITE );
-            m_reserved_size = 1; // ? maybe m_reserved_size in bytes, or just constexpr if-it into shape
+            m_reserved_pointer = VirtualAlloc ( VirtualAlloc ( nullptr, capacity_in_bytes_, MEM_RESERVE, PAGE_READWRITE ),
+                                                page_size_in_bytes, MEM_COMMIT, PAGE_READWRITE );
         }
-        return m_reserved_ptr;
+        m_reserved_size_in_bytes = capacity_in_bytes_;
+        return m_reserved_pointer;
     }
 
     static void free_reserved_pages ( ) noexcept {
         if constexpr ( not HAVE_LARGE_PAGES ) {
-            VirtualFree ( m_reserved_ptr, static_cast<unsigned long> ( m_reserved_size * page_size_in_bytes ), MEM_RELEASE );
-            m_reserved_ptr  = nullptr;
-            m_reserved_size = 0u;
+            VirtualFree ( m_reserved_pointer, m_reserved_size_in_bytes, MEM_RELEASE );
+            m_reserved_pointer       = nullptr;
+            m_reserved_size_in_bytes = 0u;
         }
         else {
             // null op.
@@ -119,20 +117,20 @@ struct windows_system {
 
     template<bool HLP = HAVE_LARGE_PAGES, typename = std::enable_if_t<not HLP>>
     static void_p commit_page ( void_p ptr_, size_t size_ ) noexcept {
-        return VirtualAlloc ( ptr_, static_cast<unsigned long> ( size_ ), MEM_COMMIT, PAGE_READWRITE );
+        return VirtualAlloc ( ptr_, size_, MEM_COMMIT, PAGE_READWRITE );
     }
     template<bool HLP = HAVE_LARGE_PAGES, typename = std::enable_if_t<not HLP>>
     static void decommit_page ( void_p ptr_, size_t size_ ) noexcept {
-        VirtualFree ( ptr_, static_cast<unsigned long> ( size_ ), MEM_DECOMMIT );
+        VirtualFree ( ptr_, size_, MEM_DECOMMIT );
     }
 
     template<bool HLP = HAVE_LARGE_PAGES, typename = std::enable_if_t<not HLP>>
     static void_p reset_page ( void_p ptr_, size_t size_ ) noexcept {
-        return VirtualAlloc ( ptr_, static_cast<unsigned long> ( size_ ), MEM_RESET );
+        return VirtualAlloc ( ptr_, size_, MEM_RESET );
     }
     template<bool HLP = HAVE_LARGE_PAGES, typename = std::enable_if_t<not HLP>>
     static void reset_undo_page ( void_p ptr_, size_t size_ ) noexcept {
-        VirtualFree ( ptr_, static_cast<unsigned long> ( size_ ), MEM_RESET_UNDO );
+        VirtualFree ( ptr_, size_, MEM_RESET_UNDO );
     }
 
     template<typename T>
@@ -245,9 +243,9 @@ struct windows_system {
 };
 
 template<bool HAVE_LARGE_PAGES>
-void * windows_system<HAVE_LARGE_PAGES>::m_reserved_ptr = nullptr;
+void * windows_system<HAVE_LARGE_PAGES>::m_reserved_pointer = nullptr;
 template<bool HAVE_LARGE_PAGES>
-size_t windows_system<HAVE_LARGE_PAGES>::m_reserved_size = 0u;
+size_t windows_system<HAVE_LARGE_PAGES>::m_reserved_size_in_bytes = 0u;
 template<bool HAVE_LARGE_PAGES>
 size_t const windows_system<HAVE_LARGE_PAGES>::page_size_in_bytes = HAVE_LARGE_PAGES ? large_page_minimum ( ) : 65'536ull;
 
@@ -290,8 +288,7 @@ struct virtual_vector {
     private:
     void first_commit_impl ( size_type page_size_in_bytes_ = 0u ) {
         m_committed_in_bytes = page_size_in_bytes_ ? page_size_in_bytes_ : sys::page_size_in_bytes;
-        m_end                = m_begin =
-            reinterpret_cast<pointer> ( sys::reserve_and_commit_page ( Capacity / sys::type_page_size<value_type> ( ) ) );
+        m_end = m_begin = reinterpret_cast<pointer> ( sys::reserve_and_commit_page ( Capacity * sizeof ( value_type ) ) );
     }
 
     public:
