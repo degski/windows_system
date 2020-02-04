@@ -490,21 +490,29 @@ int main ( ) {
     std::exception_ptr eptr;
 
     try {
-        constexpr size_t s = 1024 * 1024;
-        std::unique_ptr<int> v1 ( ( int * ) std::malloc ( s * sizeof ( int ) ) );
-        std::unique_ptr<int> v2 ( ( int * ) std::malloc ( s * sizeof ( int ) ) );
+        using type = int;
 
-        std::fill ( v1.get ( ), v1.get ( ) + s * sizeof ( int ), 123456789 );
-        std::fill ( v2.get ( ), v2.get ( ) + s * sizeof ( int ), 0 );
+        constexpr size_t s = 1024ull * 1024ull * 8, c = s * sizeof ( type );
+
+        int * v1 ( ( int * ) std::malloc ( c ) );
+        int * v2 ( ( int * ) std::calloc ( 1ull, c ) );
+
+        std::fill ( v1, v1 + s, 123456789 );
 
         plf::nanotimer t;
         t.start ( );
-        for ( int c = 0; c < 1'000'000; ++c )
-            sax::memcpy_sse_16 ( v2.get ( ), v1.get ( ), s * sizeof ( int ) );
+
+        for ( int cnt = 0; cnt < 1'024; ++cnt )
+            // sax::memcpy_sse_16 ( v2, v1, c );
+            // std::memcpy ( v2, v1, c );
+            sax::memcpy_avx ( v2, v1, c );
 
         std::uint64_t time = static_cast<std::uint64_t> ( t.get_elapsed_ms ( ) );
 
-        std::cout << v2.get ( )[ s - 100 ] << " " << time << " ms" << nl;
+        std::cout << v2[ s - 100 ] << " " << time << " ms" << nl;
+
+        std::free ( v1 );
+        std::free ( v2 );
     }
     catch ( ... ) {
         eptr = std::current_exception ( ); // Capture.
