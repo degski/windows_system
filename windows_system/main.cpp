@@ -26,12 +26,14 @@
 #include <cstdint>
 #include <cstdlib>
 
+#include <algorithm>
 #include <array>
 #include <iomanip>
 #include <sax/iostream.hpp>
 #include <iterator>
 #include <list>
 #include <map>
+#include <numeric>
 #include <random>
 #include <span>
 #include <string>
@@ -40,6 +42,7 @@
 #include <Windows.h>
 
 #include <sax/compressed_pair.hpp>
+#include <sax/integer.hpp>
 #include <sax/stl.hpp>
 
 #include <plf/plf_nanotimer.h>
@@ -385,7 +388,9 @@ struct virtual_vector {
     // Size.
 
     private:
-    [[nodiscard]] static constexpr size_type capacity_in_bytes ( ) noexcept { return Capacity * type_page_size<value_type> ( ); }
+    [[nodiscard]] static constexpr size_type capacity_in_bytes ( ) noexcept {
+        return Capacity * sys::type_page_size<value_type> ( );
+    }
     // m_committed_in_bytes is a variable.
     [[nodiscard]] size_type size_in_bytes ( ) const noexcept {
         return reinterpret_cast<char *> ( m_end ) - reinterpret_cast<char *> ( m_begin );
@@ -485,7 +490,7 @@ using heap_array = std::array<T, S>;
 template<typename T, size_t S>
 using heap_array_ptr = std::unique_ptr<heap_array<T, S>>;
 
-int main ( ) {
+int main78909 ( ) {
 
     std::exception_ptr eptr;
 
@@ -522,12 +527,25 @@ int main ( ) {
     return EXIT_SUCCESS;
 }
 
-int main769878 ( ) {
+int main ( ) {
 
     std::exception_ptr eptr;
 
     try {
 
+        std::vector<int> v{ 5, 9, 7, 3, 1, 6, 4, 8, 0, 2 };
+
+        for ( auto & e : v )
+            std::cout << e << ' ';
+        std::cout << nl;
+
+        std::make_heap ( v.begin ( ), v.end ( ) );
+
+        for ( auto & e : v )
+            std::cout << e << ' ';
+        std::cout << nl;
+
+        /*
         virtual_vector<int, size_t, 1'000'000> vv;
 
         for ( int i = 0; i < 16'384; ++i )
@@ -546,6 +564,7 @@ int main769878 ( ) {
         for ( auto & v : vv )
             std::cout << v << ' ';
         std::cout << nl;
+        */
     }
     catch ( ... ) {
         eptr = std::current_exception ( ); // Capture.
@@ -554,6 +573,18 @@ int main769878 ( ) {
 
     return EXIT_SUCCESS;
 }
+
+template<typename T>
+struct comp_less {
+
+    bool operator( ) ( T const & l, T const & r ) noexcept {
+        if ( l < r )
+            std::cout << "took a left" << nl;
+        else
+            std::cout << "took a right" << nl;
+        return l < r;
+    };
+};
 
 /*
 Windows http://www.roylongbottom.org.uk/busspd2k.zip
@@ -708,10 +739,6 @@ struct vm_committed_ptr {
 
     [[nodiscard]] pointer addressof_this ( ) const noexcept {
         return reinterpret_cast<pointer> ( const_cast<vm_committed_ptr *> ( this ) );
-    }
-
-    [[nodiscard]] static int pointer_alignment ( void * ptr_ ) noexcept {
-        return ( int ) ( ( ( std::uintptr_t ) ptr_ ) & ( ( std::uintptr_t ) ( -( ( std::intptr_t ) ptr_ ) ) ) );
     }
 };
 #endif
