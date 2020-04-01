@@ -47,6 +47,8 @@
 
 #include <plf/plf_nanotimer.h>
 
+#include "hedley.hpp"
+
 // extern unsigned long __declspec( dllimport ) __stdcall GetProcessHeaps ( unsigned long NumberOfHeaps, void ** ProcessHeaps );
 // extern __declspec( dllimport ) void * __stdcall GetProcessHeap ( );
 
@@ -407,8 +409,8 @@ struct virtual_vector {
 
     template<typename... Args>
     reference emplace_back ( Args &&... value_ ) noexcept {
-        if ( m_begin ) {
-            if ( size_in_bytes ( ) == m_committed_in_bytes ) {
+        if ( HEDLEY_LIKELY ( m_begin ) ) {
+            if ( HEDLEY_UNLIKELY ( size_in_bytes ( ) == m_committed_in_bytes ) ) {
                 sys::commit_page ( m_end, m_committed_in_bytes );
                 m_committed_in_bytes = GrowthPolicy::grow ( m_committed_in_bytes );
             }
@@ -456,7 +458,7 @@ struct virtual_vector {
     [[nodiscard]] reference back ( ) noexcept { return const_cast<reference> ( std::as_const ( *this ).back ( ) ); }
 
     [[nodiscard]] const_reference at ( size_type const i_ ) const {
-        if ( 0 <= i_ and i_ < size ( ) )
+        if ( HEDLEY_LIKELY ( 0 <= i_ and i_ < size ( ) ) )
             return m_begin[ i_ ];
         else
             throw std::runtime_error ( "virtual_vector: index out of bounds" );
@@ -533,6 +535,8 @@ int main ( ) {
 
     try {
 
+        /*
+
         std::vector<int> v{ 5, 9, 7, 3, 1, 6, 4, 8, 0, 2 };
 
         for ( auto & e : v )
@@ -545,7 +549,8 @@ int main ( ) {
             std::cout << e << ' ';
         std::cout << nl;
 
-        /*
+        */
+
         virtual_vector<int, size_t, 1'000'000> vv;
 
         for ( int i = 0; i < 16'384; ++i )
@@ -564,7 +569,7 @@ int main ( ) {
         for ( auto & v : vv )
             std::cout << v << ' ';
         std::cout << nl;
-        */
+
     }
     catch ( ... ) {
         eptr = std::current_exception ( ); // Capture.
