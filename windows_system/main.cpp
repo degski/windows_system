@@ -89,11 +89,11 @@ struct windows_system {
             m_reserved_pointer       = nullptr;
             m_reserved_size_in_bytes = 0u;
         }
-        set_privilege ( get_token_handle ( ), SE_LOCK_MEMORY_NAME, false );
+        set_privilege ( SE_LOCK_MEMORY_NAME, false );
     }
 
     [[nodiscard]] static void_p reserve_and_commit_page ( size_t const capacity_in_bytes_ ) noexcept {
-        if ( HEDLEY_UNLIKELY ( not set_privilege ( get_token_handle ( ), SE_LOCK_MEMORY_NAME, true ) ) ) {
+        if ( HEDLEY_UNLIKELY ( not set_privilege ( SE_LOCK_MEMORY_NAME, true ) ) ) {
             std::cout << "Could not set lock page privilege to enabled." << nl;
             return nullptr;
         }
@@ -197,9 +197,9 @@ struct windows_system {
         return token_handle;
     }
 
-    [[maybe_unused]] static bool set_privilege ( void * token,                         // access token handle
-                                                 wchar_t const * const privilege_name, // name of privilege to enable/disable
-                                                 bool enable_privilige ) noexcept {    // to enable or disable privilege
+    [[maybe_unused]] static bool set_privilege_impl ( void * token,                         // access token handle
+                                                      wchar_t const * const privilege_name, // name of privilege to enable/disable
+                                                      bool enable_privilige ) noexcept {    // to enable or disable privilege
         // https://docs.microsoft.com/en-us/windows/win32/secauthz/enabling-and-disabling-privileges-in-c--
         TOKEN_PRIVILEGES tp;
         LUID luid;
@@ -228,7 +228,11 @@ struct windows_system {
         return true;
     }
 
-    //
+    [[maybe_unused]] static bool set_privilege ( wchar_t const * const privilege_name, // name of privilege to enable/disable
+                                                 bool enable_privilige ) noexcept {
+        return set_privilege_impl ( get_token_handle ( ), privilege_name, enable_privilige );
+    }
+
     // typedef struct _SYSTEM_INFO {
     //      union {
     //          DWORD dwOemId;
@@ -247,7 +251,6 @@ struct windows_system {
     //      WORD wProcessorLevel;
     //      WORD wProcessorRevision;
     //  } SYSTEM_INFO, *LPSYSTEM_INFO;
-    //
 };
 
 template<bool HAVE_LARGE_PAGES>
