@@ -84,7 +84,7 @@ struct windows_system {
     windows_system ( ) = delete;
 
     ~windows_system ( ) noexcept {
-        if ( m_reserved_pointer ) {
+        if ( HEDLEY_LIKELY ( m_reserved_pointer ) ) {
             VirtualFree ( m_reserved_pointer, m_reserved_size_in_bytes, MEM_RELEASE );
             m_reserved_pointer       = nullptr;
             m_reserved_size_in_bytes = 0u;
@@ -93,11 +93,11 @@ struct windows_system {
     }
 
     [[nodiscard]] static void_p reserve_and_commit_page ( size_t const capacity_in_bytes_ ) noexcept {
-        if ( not set_privilege ( get_token_handle ( ), SE_LOCK_MEMORY_NAME, true ) ) {
+        if ( HEDLEY_UNLIKELY ( not set_privilege ( get_token_handle ( ), SE_LOCK_MEMORY_NAME, true ) ) ) {
             std::cout << "Could not set lock page privilege to enabled." << nl;
             return nullptr;
         }
-        if ( HAVE_LARGE_PAGES ) {
+        if constexpr ( HAVE_LARGE_PAGES ) {
             m_reserved_pointer =
                 VirtualAlloc ( nullptr, capacity_in_bytes_, MEM_RESERVE | MEM_COMMIT | MEM_LARGE_PAGES, PAGE_READWRITE );
         }
@@ -146,6 +146,7 @@ struct windows_system {
 
     [[nodiscard]] static size_t large_page_minimum ( ) noexcept { return GetLargePageMinimum ( ); }
     [[nodiscard]] static size_t virtual_page_size ( ) noexcept { return info.dwPageSize; }
+    // In bytes.
     [[nodiscard]] static size_t virtual_size ( ) noexcept {
         return reinterpret_cast<char *> ( info.lpMaximumApplicationAddress ) -
                reinterpret_cast<char *> ( info.lpMinimumApplicationAddress );
@@ -188,8 +189,9 @@ struct windows_system {
     [[nodiscard]] static void * get_token_handle ( ) {
         void * token_handle = nullptr;
         OpenThreadToken ( GetCurrentThread ( ), TOKEN_ADJUST_PRIVILEGES, false, std::addressof ( token_handle ) );
-        if ( GetLastError ( ) == ERROR_NO_TOKEN ) {
-            if ( not OpenProcessToken ( GetCurrentProcess ( ), TOKEN_ADJUST_PRIVILEGES, std::addressof ( token_handle ) ) )
+        if ( HEDLEY_UNLIKELY ( GetLastError ( ) == ERROR_NO_TOKEN ) ) {
+            if ( HEDLEY_UNLIKELY (
+                     not OpenProcessToken ( GetCurrentProcess ( ), TOKEN_ADJUST_PRIVILEGES, std::addressof ( token_handle ) ) ) )
                 std::cout << "OpenProcessToken error:" << GetLastError ( ) << nl;
         }
         return token_handle;
@@ -201,24 +203,25 @@ struct windows_system {
         // https://docs.microsoft.com/en-us/windows/win32/secauthz/enabling-and-disabling-privileges-in-c--
         TOKEN_PRIVILEGES tp;
         LUID luid;
-        if ( not LookupPrivilegeValue ( nullptr,                      // lookup privilege on local system
-                                        privilege_name,               // privilege to lookup
-                                        std::addressof ( luid ) ) ) { // receives LUID of privilege
+        if ( HEDLEY_UNLIKELY ( not LookupPrivilegeValue ( nullptr,                        // lookup privilege on local system
+                                                          privilege_name,                 // privilege to lookup
+                                                          std::addressof ( luid ) ) ) ) { // receives LUID of privilege
             std::cout << "LookupPrivilegeValue error: " << GetLastError ( ) << nl;
             return false;
         }
         tp.PrivilegeCount       = 1;
         tp.Privileges[ 0 ].Luid = luid;
-        if ( enable_privilige )
+        if ( HEDLEY_LIKELY ( enable_privilige ) )
             tp.Privileges[ 0 ].Attributes = SE_PRIVILEGE_ENABLED;
         else
             tp.Privileges[ 0 ].Attributes = 0;
         // Enable the privilege or disable all privileges.
-        if ( not AdjustTokenPrivileges ( token, false, std::addressof ( tp ), sizeof ( TOKEN_PRIVILEGES ), nullptr, nullptr ) ) {
+        if ( HEDLEY_UNLIKELY ( not AdjustTokenPrivileges ( token, false, std::addressof ( tp ), sizeof ( TOKEN_PRIVILEGES ),
+                                                           nullptr, nullptr ) ) ) {
             std::cout << "AdjustTokenPrivileges error:" << GetLastError ( ) << nl;
             return false;
         }
-        if ( GetLastError ( ) == ERROR_NOT_ALL_ASSIGNED ) {
+        if ( HEDLEY_UNLIKELY ( GetLastError ( ) == ERROR_NOT_ALL_ASSIGNED ) ) {
             std::cout << "The token does not have the specified privilege." << nl;
             return false;
         }
@@ -401,8 +404,10 @@ struct virtual_vector {
     public:
     [[nodiscard]] static constexpr size_type capacity ( ) noexcept { return Capacity; }
     [[nodiscard]] size_type committed ( ) const noexcept { return m_committed_in_bytes / sizeof ( value_type ); }
-    [[nodiscard]] size_type size ( ) const noexcept { return size_in_bytes ( ) / sizeof ( value_type ); }
-
+    // [[nodiscard]] size_type size ( ) const noexcept { return size_in_bytes ( ) / sizeof ( value_type ); }
+    [[nodiscard]] size_type size ( ) const noexcept {
+        return reinterpret_cast<value_type *> ( m_end ) - reinterpret_cast<value_type *> ( m_begin );
+    }
     [[nodiscard]] static constexpr size_type max_size ( ) noexcept { return capacity ( ); }
 
     // Add.
@@ -569,7 +574,6 @@ int main ( ) {
         for ( auto & v : vv )
             std::cout << v << ' ';
         std::cout << nl;
-
     }
     catch ( ... ) {
         eptr = std::current_exception ( ); // Capture.
