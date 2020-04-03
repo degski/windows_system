@@ -172,7 +172,7 @@ struct windows_system {
     size_t m_reserved_size_in_bytes = 0u;
 
     public:
-    static size_t const page_size_in_bytes = HAVE_LARGE_PAGES ? large_page_minimum ( ) : 65'536ull;
+    static size_t const page_size_in_bytes;
 
     private:
     static SYSTEM_INFO info;
@@ -250,7 +250,8 @@ struct windows_system {
     //      WORD wProcessorRevision;
     //  } SYSTEM_INFO, *LPSYSTEM_INFO;
 };
-
+template<bool HAVE_LARGE_PAGES>
+size_t const windows_system<HAVE_LARGE_PAGES>::page_size_in_bytes = HAVE_LARGE_PAGES ? large_page_minimum ( ) : 65'536ull;
 template<bool HAVE_LARGE_PAGES>
 SYSTEM_INFO windows_system<HAVE_LARGE_PAGES>::info = get_system_information ( );
 
