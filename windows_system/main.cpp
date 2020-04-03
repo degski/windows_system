@@ -71,17 +71,8 @@ struct windows_system {
 
     using void_p = void *;
 
-    private:
-    static void_p m_reserved_pointer;
-    static size_t m_reserved_size_in_bytes;
-
-    public:
-    static size_t const page_size_in_bytes;
-
     // 2'097'152 = 200MB = 2 ^ 21
     //    65'536 =  64KB = 2 ^ 16
-
-    windows_system ( ) = delete;
 
     ~windows_system ( ) noexcept {
         if ( HEDLEY_LIKELY ( m_reserved_pointer ) ) {
@@ -92,7 +83,7 @@ struct windows_system {
         set_privilege ( SE_LOCK_MEMORY_NAME, false );
     }
 
-    [[nodiscard]] static void_p reserve_and_commit_page ( size_t const capacity_in_bytes_ ) noexcept {
+    [[nodiscard]] void_p reserve_and_commit_page ( size_t const capacity_in_bytes_ ) noexcept {
         if ( HEDLEY_UNLIKELY ( not set_privilege ( SE_LOCK_MEMORY_NAME, true ) ) ) {
             std::cout << "Could not set lock page privilege to enabled." << nl;
             return nullptr;
@@ -109,7 +100,7 @@ struct windows_system {
         return m_reserved_pointer;
     }
 
-    static void free_reserved_pages ( ) noexcept {
+    void free_reserved_pages ( ) noexcept {
         if constexpr ( not HAVE_LARGE_PAGES ) {
             VirtualFree ( m_reserved_pointer, m_reserved_size_in_bytes, MEM_RELEASE );
             m_reserved_pointer       = nullptr;
@@ -139,7 +130,7 @@ struct windows_system {
     }
 
     template<typename T>
-    static constexpr size_t type_page_size ( size_t large_page_size_ = 0u ) noexcept {
+    constexpr size_t type_page_size ( size_t large_page_size_ = 0u ) noexcept {
         assert ( ( page_size_in_bytes / sizeof ( T ) ) * sizeof ( T ) == page_size_in_bytes );
         return page_size_in_bytes / sizeof ( T );
     }
@@ -175,6 +166,13 @@ struct windows_system {
         volatile void * p = std::addressof ( p );
         return const_cast<void *> ( p );
     }
+
+    private:
+    void_p m_reserved_pointer       = nullptr;
+    size_t m_reserved_size_in_bytes = 0u;
+
+    public:
+    static size_t const page_size_in_bytes = HAVE_LARGE_PAGES ? large_page_minimum ( ) : 65'536ull;
 
     private:
     static SYSTEM_INFO info;
@@ -233,7 +231,7 @@ struct windows_system {
         return set_privilege_impl ( get_token_handle ( ), privilege_name, enable_privilige );
     }
 
-    // typedef struct _SYSTEM_INFO {
+    // using struct _SYSTEM_INFO {
     //      union {
     //          DWORD dwOemId;
     //          struct {
@@ -252,13 +250,6 @@ struct windows_system {
     //      WORD wProcessorRevision;
     //  } SYSTEM_INFO, *LPSYSTEM_INFO;
 };
-
-template<bool HAVE_LARGE_PAGES>
-void * windows_system<HAVE_LARGE_PAGES>::m_reserved_pointer = nullptr;
-template<bool HAVE_LARGE_PAGES>
-size_t windows_system<HAVE_LARGE_PAGES>::m_reserved_size_in_bytes = 0u;
-template<bool HAVE_LARGE_PAGES>
-size_t const windows_system<HAVE_LARGE_PAGES>::page_size_in_bytes = HAVE_LARGE_PAGES ? large_page_minimum ( ) : 65'536ull;
 
 template<bool HAVE_LARGE_PAGES>
 SYSTEM_INFO windows_system<HAVE_LARGE_PAGES>::info = get_system_information ( );
@@ -299,7 +290,7 @@ struct virtual_vector {
     private:
     void first_commit_impl ( size_type page_size_in_bytes_ = 0u ) {
         m_committed_in_bytes = page_size_in_bytes_ ? page_size_in_bytes_ : sys::page_size_in_bytes;
-        m_end = m_begin = reinterpret_cast<pointer> ( sys::reserve_and_commit_page ( Capacity * sizeof ( value_type ) ) );
+        m_end = m_begin = reinterpret_cast<pointer> ( m_sys.reserve_and_commit_page ( Capacity * sizeof ( value_type ) ) );
     }
 
     public:
@@ -320,40 +311,9 @@ struct virtual_vector {
 
     ~virtual_vector ( ) noexcept {
         clear_impl ( );
-        sys::free_reserved_pages ( );
+        m_sys.free_reserved_pages ( );
     }
-    /*
-    [[maybe_unused]] virtual_vector const & operator= ( virtual_vector const & vv_ ) const {
-        // Copy to the elements of this if they are exist (on both sides).
-        if ( size ( ) < vv_.size ( ) ) {
-            auto const area = std::span<value_type>{ vv_.m_begin, vv_.m_begin + size ( ) };
-            pointer end     = m_begin;
-            for ( auto const & v : area )
-                *end++ = v;
-            // Adjust committed.
-            if ( committed ( ) < vv_.commited ( ) ) {
-                // Grow this.
-            }
-            else {
-            }
 
-            area = std::span<value_type>{ vv_.m_begin + size ( ), vv_.m_end };
-            for ( auto const & v : area )
-                push_back ( v );
-        }
-        else {
-        }
-
-        first_commit_impl ( vv_.m_committed_in_bytes );
-        if constexpr ( not std::is_scalar<value_type>::value ) {
-            std::memcpy ( m_begin, vv_.m_begin, vv_.m_end - vv_.begin );
-        }
-        else {
-            for ( auto const & v : vv_ )
-                new ( m_end++ ) value_type{ v };
-        }
-    }
-    */
     private:
     void push_up_committed ( size_type const to_commit_size_in_bytes_ ) noexcept {
         size_type cib = m_committed_in_bytes;
@@ -362,8 +322,6 @@ struct virtual_vector {
         for ( ; begin == end; cib = GrowthPolicy::grow ( cib ), begin += cib )
             sys::commit_page ( begin, cib );
     }
-
-    // Tear down committed.
     void tear_down_committed ( size_type const to_commit_size_in_bytes_ = 0u ) noexcept {
         size_type com                = GrowthPolicy::shrink ( committed ( ) );
         pointer rbegin               = m_begin + com;
@@ -396,9 +354,7 @@ struct virtual_vector {
     // Size.
 
     private:
-    [[nodiscard]] static constexpr size_type capacity_in_bytes ( ) noexcept {
-        return Capacity * sys::type_page_size<value_type> ( );
-    }
+    [[nodiscard]] constexpr size_type capacity_in_bytes ( ) noexcept { return Capacity * m_sys.type_page_size<value_type> ( ); }
     // m_committed_in_bytes is a variable.
     [[nodiscard]] size_type size_in_bytes ( ) const noexcept {
         return reinterpret_cast<char *> ( m_end ) - reinterpret_cast<char *> ( m_begin );
@@ -479,6 +435,7 @@ struct virtual_vector {
     }
 
     private:
+    sys m_sys;
     // Initialed with valid ptr to reserved memory and size = 0 (the number of committed pages).
     pointer m_begin = nullptr, m_end = nullptr;
     std::size_t m_committed_in_bytes;
@@ -754,3 +711,64 @@ struct vm_committed_ptr {
     }
 };
 #endif
+
+template<typename T>
+struct vm_allocator {
+
+    using value_type      = T;
+    using size_type       = std::size_t;
+    using difference_type = std::ptrdiff_t;
+    using reference       = value_type &;
+    using const_reference = value_type const &;
+    using pointer         = value_type *;
+    using const_pointer   = value_type const *;
+
+    template<class U>
+    struct rebind {
+        using other = vm_allocator<U>;
+    };
+
+    vm_allocator ( ) noexcept                      = default;
+    vm_allocator ( vm_allocator const & ) noexcept = default;
+    template<class U>
+    vm_allocator ( vm_allocator<U> const & ) noexcept {}
+
+    vm_allocator select_on_container_copy_construction ( ) const { return *this; }
+
+    [[nodiscard]] T * allocate ( size_type count ) { return static_cast<T *> ( mi_new_n ( count, sizeof ( T ) ) ); }
+    [[nodiscard]] T * allocate ( size_type count, void const * ) { return allocate ( count ); }
+
+    void deallocate ( T * p, size_type ) { mi_free ( p ); }
+
+    using propagate_on_container_copy_assignment = std::true_type;
+    using propagate_on_container_move_assignment = std::true_type;
+    using propagate_on_container_swap            = std::true_type;
+    using is_always_equal                        = std::true_type;
+
+    template<typename U, typename... Args>
+    void construct ( U * p, Args &&... args ) {
+        ::new ( p ) U ( std::forward<Args> ( args )... );
+    }
+    template<typename U>
+    void destroy ( U * p ) noexcept {
+        p->~U ( );
+    }
+
+    [[nodiscard]] size_type max_size ( ) const noexcept {
+        return ( std::numeric_limits<std::ptrdiff_t>::max ( ) / sizeof ( value_type ) );
+    }
+
+    [[nodiscard]] const_pointer address ( const_reference x ) const noexcept { return std::addressof ( x ); }
+    [[nodiscard]] pointer address ( const_reference x ) noexcept {
+        return const_cast<pointer> ( std::as_const ( *this ).address ( x ) );
+    }
+};
+
+template<typename T1, typename T2>
+bool operator== ( vm_allocator<T1> const &, vm_allocator<T2> const & ) noexcept {
+    return true;
+}
+template<typename T1, typename T2>
+bool operator!= ( vm_allocator<T1> const &, vm_allocator<T2> const & ) noexcept {
+    return false;
+}
