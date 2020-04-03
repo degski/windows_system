@@ -39,7 +39,6 @@
 #include <string>
 #include <type_traits>
 #include <vector>
-#include <Windows.h>
 
 #include <sax/compressed_pair.hpp>
 #include <sax/integer.hpp>
@@ -47,7 +46,9 @@
 
 #include <plf/plf_nanotimer.h>
 
-#include "hedley.hpp"
+#include <hedley.hpp>
+
+#include "winsys.hpp"
 
 // extern unsigned long __declspec( dllimport ) __stdcall GetProcessHeaps ( unsigned long NumberOfHeaps, void ** ProcessHeaps );
 // extern __declspec( dllimport ) void * __stdcall GetProcessHeap ( );
@@ -59,10 +60,6 @@
     C:\Program Files\LLVM\lib\clang\10.0.0\lib\windows\clang_rt.asan-preinit-x86_64.lib;
     C:\Program Files\LLVM\lib\clang\10.0.0\lib\windows\clang_rt.asan-x86_64.lib
 */
-
-#include <processthreadsapi.h>
-
-#pragma comment( lib, "Advapi32.lib" )
 
 // https://stackoverflow.com/questions/251248/how-can-i-get-the-sid-of-the-current-windows-account#251267
 
@@ -80,11 +77,11 @@ struct windows_system {
             m_reserved_pointer       = nullptr;
             m_reserved_size_in_bytes = 0u;
         }
-        set_privilege ( SE_LOCK_MEMORY_NAME, false );
+        win::set_privilege ( SE_LOCK_MEMORY_NAME, false );
     }
 
     [[nodiscard]] void_p reserve_and_commit_page ( size_t const capacity_in_bytes_ ) noexcept {
-        if ( HEDLEY_UNLIKELY ( not set_privilege ( SE_LOCK_MEMORY_NAME, true ) ) ) {
+        if ( HEDLEY_UNLIKELY ( not win::set_privilege ( SE_LOCK_MEMORY_NAME, true ) ) ) {
             std::cout << "Could not set lock page privilege to enabled." << nl;
             return nullptr;
         }
@@ -135,125 +132,15 @@ struct windows_system {
         return page_size_in_bytes / sizeof ( T );
     }
 
-    [[nodiscard]] static size_t large_page_minimum ( ) noexcept { return GetLargePageMinimum ( ); }
-    [[nodiscard]] static size_t virtual_page_size ( ) noexcept { return info.dwPageSize; }
-    // In bytes.
-    [[nodiscard]] static size_t virtual_size ( ) noexcept {
-        return reinterpret_cast<char *> ( info.lpMaximumApplicationAddress ) -
-               reinterpret_cast<char *> ( info.lpMinimumApplicationAddress );
-    }
-    [[nodiscard]] static size_t granularity ( ) noexcept { return info.dwAllocationGranularity; }
-    [[nodiscard]] static sax::pair<void_p, void_p> application_memory_bounds ( ) noexcept {
-        return { info.lpMinimumApplicationAddress, info.lpMaximumApplicationAddress };
-    }
-    [[nodiscard]] static size_t number_virtual_cores ( ) noexcept { return info.dwNumberOfProcessors; }
-
-    static void update ( ) noexcept { info = get_system_information ( ); }
-
-    // Get all heaps.
-    [[nodiscard]] static std::vector<void_p> heaps ( ) noexcept {
-        void_p h[ 16u ];
-        unsigned long s = GetProcessHeaps ( 0u, nullptr );
-        while ( GetProcessHeaps ( s, h ) != s )
-            s = GetProcessHeaps ( 0u, nullptr );
-        return { h, h + s };
-    }
-
-    // Default heap.
-    [[nodiscard]] static void_p heap ( ) noexcept { return GetProcessHeap ( ); }
-
-    [[nodiscard]] static void_p stack ( ) noexcept {
-        volatile void * p = std::addressof ( p );
-        return const_cast<void *> ( p );
-    }
-
     private:
     void_p m_reserved_pointer       = nullptr;
     size_t m_reserved_size_in_bytes = 0u;
 
     public:
     static size_t const page_size_in_bytes;
-
-    private:
-    static SYSTEM_INFO info;
-
-    static SYSTEM_INFO get_system_information ( ) noexcept {
-        assert ( virtual_page_size ( ) == std::numeric_limits<std::uint16_t>::max ( ) );
-        SYSTEM_INFO si;
-        GetSystemInfo ( std::addressof ( si ) );
-        return si;
-    }
-
-    [[nodiscard]] static void * get_token_handle ( ) {
-        void * token_handle = nullptr;
-        OpenThreadToken ( GetCurrentThread ( ), TOKEN_ADJUST_PRIVILEGES, false, std::addressof ( token_handle ) );
-        if ( HEDLEY_UNLIKELY ( GetLastError ( ) == ERROR_NO_TOKEN ) ) {
-            if ( HEDLEY_UNLIKELY (
-                     not OpenProcessToken ( GetCurrentProcess ( ), TOKEN_ADJUST_PRIVILEGES, std::addressof ( token_handle ) ) ) )
-                std::cout << "OpenProcessToken error:" << GetLastError ( ) << nl;
-        }
-        return token_handle;
-    }
-
-    [[maybe_unused]] static bool set_privilege_impl ( void * token,                         // access token handle
-                                                      wchar_t const * const privilege_name, // name of privilege to enable/disable
-                                                      bool enable_privilige ) noexcept {    // to enable or disable privilege
-        // https://docs.microsoft.com/en-us/windows/win32/secauthz/enabling-and-disabling-privileges-in-c--
-        TOKEN_PRIVILEGES tp;
-        LUID luid;
-        if ( HEDLEY_UNLIKELY ( not LookupPrivilegeValue ( nullptr,                        // lookup privilege on local system
-                                                          privilege_name,                 // privilege to lookup
-                                                          std::addressof ( luid ) ) ) ) { // receives LUID of privilege
-            std::cout << "LookupPrivilegeValue error: " << GetLastError ( ) << nl;
-            return false;
-        }
-        tp.PrivilegeCount       = 1;
-        tp.Privileges[ 0 ].Luid = luid;
-        if ( HEDLEY_LIKELY ( enable_privilige ) )
-            tp.Privileges[ 0 ].Attributes = SE_PRIVILEGE_ENABLED;
-        else
-            tp.Privileges[ 0 ].Attributes = 0;
-        // Enable the privilege or disable all privileges.
-        if ( HEDLEY_UNLIKELY ( not AdjustTokenPrivileges ( token, false, std::addressof ( tp ), sizeof ( TOKEN_PRIVILEGES ),
-                                                           nullptr, nullptr ) ) ) {
-            std::cout << "AdjustTokenPrivileges error:" << GetLastError ( ) << nl;
-            return false;
-        }
-        if ( HEDLEY_UNLIKELY ( GetLastError ( ) == ERROR_NOT_ALL_ASSIGNED ) ) {
-            std::cout << "The token does not have the specified privilege." << nl;
-            return false;
-        }
-        return true;
-    }
-
-    [[maybe_unused]] static bool set_privilege ( wchar_t const * const privilege_name, // name of privilege to enable/disable
-                                                 bool enable_privilige ) noexcept {
-        return set_privilege_impl ( get_token_handle ( ), privilege_name, enable_privilige );
-    }
-
-    // using struct _SYSTEM_INFO {
-    //      union {
-    //          DWORD dwOemId;
-    //          struct {
-    //              WORD wProcessorArchitecture;
-    //              WORD wReserved;
-    //          } DUMMYSTRUCTNAME;
-    //      } DUMMYUNIONNAME;
-    //      DWORD dwPageSize;
-    //      LPVOID lpMinimumApplicationAddress;
-    //      LPVOID lpMaximumApplicationAddress;
-    //      DWORD_PTR dwActiveProcessorMask;
-    //      DWORD dwNumberOfProcessors;
-    //      DWORD dwProcessorType;
-    //      DWORD dwAllocationGranularity;
-    //      WORD wProcessorLevel;
-    //      WORD wProcessorRevision;
-    //  } SYSTEM_INFO, *LPSYSTEM_INFO;
 };
 template<bool HAVE_LARGE_PAGES>
-size_t const windows_system<HAVE_LARGE_PAGES>::page_size_in_bytes = HAVE_LARGE_PAGES ? large_page_minimum ( ) : 65'536ull;
-template<bool HAVE_LARGE_PAGES>
-SYSTEM_INFO windows_system<HAVE_LARGE_PAGES>::info = get_system_information ( );
+size_t const windows_system<HAVE_LARGE_PAGES>::page_size_in_bytes = HAVE_LARGE_PAGES ? win::large_page_minimum ( ) : 65'536ull;
 
 using sys = windows_system<false>;
 
