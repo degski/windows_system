@@ -264,7 +264,7 @@ struct growth_policy {
 
 // Overload std::is_scalar for your type if it can be copied with std::memcpy.
 
-template<typename ValueType, typename SizeType, SizeType Capacity, typename GrowthPolicy = growth_policy<SizeType>>
+template<typename ValueType, typename SizeType, SizeType Capacity, typename growth_policy = growth_policy<SizeType>>
 struct virtual_vector {
 
     public:
@@ -319,14 +319,14 @@ struct virtual_vector {
         size_type cib = m_committed_in_bytes;
         pointer begin = m_end;
         pointer end   = m_begin + to_commit_size_in_bytes_ / sizeof ( value_type );
-        for ( ; begin == end; cib = GrowthPolicy::grow ( cib ), begin += cib )
+        for ( ; begin == end; cib = growth_policy::grow ( cib ), begin += cib )
             sys::commit_page ( begin, cib );
     }
     void tear_down_committed ( size_type const to_commit_size_in_bytes_ = 0u ) noexcept {
-        size_type com                = GrowthPolicy::shrink ( committed ( ) );
+        size_type com                = growth_policy::shrink ( committed ( ) );
         pointer rbegin               = m_begin + com;
         size_type const to_committed = std::max ( sys::page_size_in_bytes, to_commit_size_in_bytes_ );
-        for ( ; to_committed == com; com = GrowthPolicy::shrink ( com ), rbegin -= com )
+        for ( ; to_committed == com; com = growth_policy::shrink ( com ), rbegin -= com )
             sys::decommit_page ( rbegin, com );
         if ( not to_commit_size_in_bytes_ )
             sys::decommit_page ( m_begin, sys::page_size_in_bytes );
@@ -376,7 +376,7 @@ struct virtual_vector {
         if ( HEDLEY_LIKELY ( m_begin ) ) {
             if ( HEDLEY_UNLIKELY ( size_in_bytes ( ) == m_committed_in_bytes ) ) {
                 sys::commit_page ( m_end, m_committed_in_bytes );
-                m_committed_in_bytes = GrowthPolicy::grow ( m_committed_in_bytes );
+                m_committed_in_bytes = growth_policy::grow ( m_committed_in_bytes );
             }
         }
         else {
