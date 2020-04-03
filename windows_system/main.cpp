@@ -73,7 +73,7 @@ struct windows_system {
 
     ~windows_system ( ) noexcept {
         if ( HEDLEY_LIKELY ( m_reserved_pointer ) ) {
-            VirtualFree ( m_reserved_pointer, m_reserved_size_in_bytes, MEM_RELEASE );
+            win::virtual_free ( m_reserved_pointer, m_reserved_size_in_bytes, MEM_RELEASE );
             m_reserved_pointer       = nullptr;
             m_reserved_size_in_bytes = 0u;
         }
@@ -87,11 +87,12 @@ struct windows_system {
         }
         if constexpr ( HAVE_LARGE_PAGES ) {
             m_reserved_pointer =
-                VirtualAlloc ( nullptr, capacity_in_bytes_, MEM_RESERVE | MEM_COMMIT | MEM_LARGE_PAGES, PAGE_READWRITE );
+                win::virtual_alloc ( nullptr, capacity_in_bytes_, MEM_RESERVE | MEM_COMMIT | MEM_LARGE_PAGES, PAGE_READWRITE );
         }
         else {
-            m_reserved_pointer = VirtualAlloc ( VirtualAlloc ( nullptr, capacity_in_bytes_, MEM_RESERVE, PAGE_READWRITE ),
-                                                page_size_in_bytes, MEM_COMMIT, PAGE_READWRITE );
+            m_reserved_pointer =
+                win::virtual_alloc ( win::virtual_alloc ( nullptr, capacity_in_bytes_, MEM_RESERVE, PAGE_READWRITE ),
+                                     page_size_in_bytes, MEM_COMMIT, PAGE_READWRITE );
         }
         m_reserved_size_in_bytes = capacity_in_bytes_;
         return m_reserved_pointer;
@@ -99,9 +100,11 @@ struct windows_system {
 
     void free_reserved_pages ( ) noexcept {
         if constexpr ( not HAVE_LARGE_PAGES ) {
-            VirtualFree ( m_reserved_pointer, m_reserved_size_in_bytes, MEM_RELEASE );
-            m_reserved_pointer       = nullptr;
-            m_reserved_size_in_bytes = 0u;
+            if ( m_reserved_pointer ) {
+                win::virtual_free ( m_reserved_pointer, m_reserved_size_in_bytes, MEM_RELEASE );
+                m_reserved_pointer       = nullptr;
+                m_reserved_size_in_bytes = 0u;
+            }
         }
         else {
             // null op.
@@ -110,20 +113,20 @@ struct windows_system {
 
     template<bool HLP = HAVE_LARGE_PAGES, typename = std::enable_if_t<not HLP>>
     static void_p commit_page ( void_p ptr_, size_t size_ ) noexcept {
-        return VirtualAlloc ( ptr_, size_, MEM_COMMIT, PAGE_READWRITE );
+        return win::virtual_alloc ( ptr_, size_, MEM_COMMIT, PAGE_READWRITE );
     }
     template<bool HLP = HAVE_LARGE_PAGES, typename = std::enable_if_t<not HLP>>
     static void decommit_page ( void_p ptr_, size_t size_ ) noexcept {
-        VirtualAlloc ( ptr_, size_, MEM_DECOMMIT, PAGE_NOACCESS );
+        win::virtual_alloc ( ptr_, size_, MEM_DECOMMIT, PAGE_NOACCESS );
     }
 
     template<bool HLP = HAVE_LARGE_PAGES, typename = std::enable_if_t<not HLP>>
     static void_p reset_page ( void_p ptr_, size_t size_ ) noexcept {
-        return VirtualAlloc ( ptr_, size_, MEM_RESET, PAGE_NOACCESS );
+        return win::virtual_alloc ( ptr_, size_, MEM_RESET, PAGE_NOACCESS );
     }
     template<bool HLP = HAVE_LARGE_PAGES, typename = std::enable_if_t<not HLP>>
     static void reset_undo_page ( void_p ptr_, size_t size_ ) noexcept {
-        VirtualAlloc ( ptr_, size_, MEM_RESET_UNDO, PAGE_READWRITE );
+        win::virtual_alloc ( ptr_, size_, MEM_RESET_UNDO, PAGE_READWRITE );
     }
 
     template<typename T>
@@ -326,7 +329,7 @@ struct virtual_vector {
     sys m_sys;
     // Initialed with valid ptr to reserved memory and size = 0 (the number of committed pages).
     pointer m_begin = nullptr, m_end = nullptr;
-    std::size_t m_committed_in_bytes;
+    size_type m_committed_in_bytes;
 };
 
 void handleEptr ( std::exception_ptr eptr ) { // Passing by value is ok.
@@ -446,7 +449,7 @@ struct comp_less {
 /*
 Windows http://www.roylongbottom.org.uk/busspd2k.zip
 
- xx = (int *)VirtualAlloc(nullptr, useMemK*1024+256, MEM_COMMIT, PAGE_READWRITE);
+ xx = (int *)win::virtual_alloc(nullptr, useMemK*1024+256, MEM_COMMIT, PAGE_READWRITE);
 
 Linux http://www.roylongbottom.org.uk/memory_benchmarks.tar.gz
 

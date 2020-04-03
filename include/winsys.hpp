@@ -96,6 +96,13 @@ inline SYSTEM_INFO const info = get_system_information ( );
 [[nodiscard]] inline size_t large_page_minimum ( ) noexcept { return GetLargePageMinimum ( ); }
 [[nodiscard]] inline size_t virtual_page_size ( ) noexcept { return info.dwPageSize; }
 
+[[maybe_unused]] inline LPVOID virtual_alloc ( LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect ) noexcept {
+    return VirtualAlloc ( lpAddress, dwSize, flAllocationType, flProtect );
+}
+[[maybe_unused]] inline BOOL virtual_free ( LPVOID lpAddress, SIZE_T dwSize, DWORD dwFreeType ) noexcept {
+    return VirtualFree ( lpAddress, dwSize, dwFreeType );
+}
+
 } // namespace win
 
 // using struct _SYSTEM_INFO {
