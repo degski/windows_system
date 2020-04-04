@@ -64,8 +64,6 @@ struct virtual_vector {
 
     virtual_vector ( ) noexcept = default;
 
-    private:
-    public:
     virtual_vector ( virtual_vector const & vv_ ) {
         first_commit_page_impl ( vv_.m_committed_size_in_bytes );
         // todo set up space in this.
