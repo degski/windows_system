@@ -23,6 +23,8 @@
 
 #pragma once
 
+#include <type_traits>
+
 #include <sax/stl.hpp>
 
 #include "winsys.hpp"
