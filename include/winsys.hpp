@@ -46,6 +46,8 @@ inline SYSTEM_INFO get_system_information ( ) noexcept {
 
 inline SYSTEM_INFO const info = get_system_information ( );
 
+inline constexpr std::size_t page_size_in_bytes = 65'536ull;
+
 [[nodiscard]] inline void * get_token_handle ( ) {
     void * token_handle = nullptr;
     OpenThreadToken ( GetCurrentThread ( ), TOKEN_ADJUST_PRIVILEGES, false, std::addressof ( token_handle ) );

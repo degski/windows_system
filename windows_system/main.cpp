@@ -48,7 +48,7 @@
 
 #include <hedley.hpp>
 
-#include "winsys.hpp"
+#include "virtual_vector.hpp"
 
 // extern unsigned long __declspec( dllimport ) __stdcall GetProcessHeaps ( unsigned long NumberOfHeaps, void ** ProcessHeaps );
 // extern __declspec( dllimport ) void * __stdcall GetProcessHeap ( );
@@ -407,7 +407,7 @@ int main ( ) {
 
         */
 
-        virtual_vector<int, size_t, 1'000'000> vv;
+        sax::virtual_vector<int, size_t, 1'000'000> vv;
 
         for ( int i = 0; i < 16'384; ++i )
             vv.emplace_back ( i );
