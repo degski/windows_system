@@ -77,47 +77,14 @@ struct virtual_vector {
 
     ~virtual_vector ( ) noexcept {
         clear_impl ( );
-        free_reserved_pages_impl ( );
-    }
-
-    private:
-    void push_up_committed ( size_type const to_commit_size_in_bytes_ ) noexcept {
-        size_type cib = m_committed_size_in_bytes;
-        pointer begin = m_end;
-        pointer end   = m_begin + to_commit_size_in_bytes_ / sizeof ( value_type );
-        for ( ; begin == end; cib = growth_policy::grow ( cib ), begin += cib )
-            commit_page_impl ( begin, cib );
-    }
-    void tear_down_committed ( size_type const to_commit_size_in_bytes_ = 0u ) noexcept {
-        size_type com                = growth_policy::shrink ( committed ( ) );
-        pointer rbegin               = m_begin + com;
-        size_type const to_committed = std::max ( win::page_size_in_bytes, to_commit_size_in_bytes_ );
-        for ( ; to_committed == com; com = growth_policy::shrink ( com ), rbegin -= com )
-            decommit_page_impl ( rbegin, com );
-        if ( not to_commit_size_in_bytes_ )
-            decommit_page_impl ( m_begin, win::page_size_in_bytes );
-    }
-
-    void clear_impl ( ) noexcept {
-        if ( m_committed_size_in_bytes ) {
-            // Destroy objects.
-            if constexpr ( not std::is_scalar<value_type>::value ) {
-                for ( auto & v : *this )
-                    v.~value_type ( );
-            }
-            tear_down_committed ( );
-        }
-    }
-
-    void free_reserved_pages_impl ( ) noexcept {
         if ( m_begin ) {
             win::virtual_free ( m_begin, m_reserved_size_in_bytes, MEM_RELEASE );
             m_begin                  = nullptr;
             m_reserved_size_in_bytes = 0u;
         }
+        win::set_privilege ( SE_LOCK_MEMORY_NAME, false );
     }
 
-    public:
     void clear ( ) noexcept {
         clear_impl ( );
         m_end                     = m_begin;
@@ -224,6 +191,22 @@ struct virtual_vector {
     }
     static void decommit_page_impl ( void_p ptr_, size_t size_ ) noexcept {
         win::virtual_alloc ( ptr_, size_, MEM_DECOMMIT, PAGE_NOACCESS );
+    }
+
+    void clear_impl ( ) noexcept {
+        if ( m_committed_size_in_bytes ) {
+            // Destroy objects.
+            if constexpr ( not std::is_scalar<value_type>::value ) {
+                for ( auto & v : *this )
+                    v.~value_type ( );
+            }
+            // Tear-down committed.
+            size_type com  = growth_policy::shrink ( committed ( ) );
+            pointer rbegin = m_begin + com;
+            for ( ; win::page_size_in_bytes == com; com = growth_policy::shrink ( com ), rbegin -= com )
+                decommit_page_impl ( rbegin, com );
+            decommit_page_impl ( m_begin, win::page_size_in_bytes );
+        }
     }
 
     // Initialed with valid ptr to reserved memory and size = 0 (the number of committed pages).
