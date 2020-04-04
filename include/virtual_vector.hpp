@@ -77,9 +77,8 @@ struct virtual_vector {
     ~virtual_vector ( ) noexcept {
         clear_impl ( );
         if ( m_begin ) {
-            win::virtual_free ( m_begin, m_reserved_size_in_bytes, MEM_RELEASE );
-            m_begin                  = nullptr;
-            m_reserved_size_in_bytes = 0u;
+            win::virtual_free ( m_begin, capacity_in_bytes ( ), MEM_RELEASE );
+            m_begin = nullptr;
         }
         win::set_privilege ( SE_LOCK_MEMORY_NAME, false );
     }
@@ -100,12 +99,12 @@ struct virtual_vector {
     }
 
     public:
-    [[nodiscard]] static constexpr size_type capacity ( ) noexcept { return Capacity; }
+    [[nodiscard]] constexpr size_type capacity ( ) noexcept { return Capacity; }
     [[nodiscard]] size_type committed ( ) const noexcept { return m_committed_size_in_bytes / sizeof ( value_type ); }
     [[nodiscard]] size_type size ( ) const noexcept {
         return reinterpret_cast<value_type *> ( m_end ) - reinterpret_cast<value_type *> ( m_begin );
     }
-    [[nodiscard]] static constexpr size_type max_size ( ) noexcept { return capacity ( ); }
+    [[nodiscard]] constexpr size_type max_size ( ) noexcept { return capacity ( ); }
 
     // Add.
 
@@ -174,11 +173,11 @@ struct virtual_vector {
 
     private:
     void first_commit_page_impl ( size_type page_size_in_bytes_ = 0u ) {
-        m_committed_size_in_bytes = win::page_size_in_bytes, m_reserved_size_in_bytes = Capacity * sizeof ( value_type );
+        m_committed_size_in_bytes = win::page_size_in_bytes;
         if ( HEDLEY_UNLIKELY ( not win::set_privilege ( SE_LOCK_MEMORY_NAME, true ) ) )
             std::cout << "Could not set lock page privilege to enabled." << nl;
         m_end = m_begin = reinterpret_cast<pointer> (
-            win::virtual_alloc ( win::virtual_alloc ( nullptr, m_reserved_size_in_bytes, MEM_RESERVE, PAGE_READWRITE ),
+            win::virtual_alloc ( win::virtual_alloc ( nullptr, capacity_in_bytes ( ), MEM_RESERVE, PAGE_READWRITE ),
                                  m_committed_size_in_bytes, MEM_COMMIT, PAGE_READWRITE ) );
     }
 
@@ -207,6 +206,6 @@ struct virtual_vector {
 
     // Initialed with valid ptr to reserved memory and size = 0 (the number of committed pages).
     pointer m_begin = nullptr, m_end = nullptr;
-    size_type m_committed_size_in_bytes, m_reserved_size_in_bytes;
+    size_type m_committed_size_in_bytes;
 };
 } // namespace sax
