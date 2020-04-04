@@ -23,6 +23,8 @@
 
 #pragma once
 
+#include <sax/stl.hpp>
+
 #include "winsys.hpp"
 
 namespace sax {
@@ -41,8 +43,6 @@ struct virtual_vector {
 
     using pointer       = value_type *;
     using const_pointer = value_type const *;
-
-    using void_p = void *;
 
     using reference       = value_type &;
     using const_reference = value_type const &;
@@ -64,7 +64,6 @@ struct virtual_vector {
         first_commit_page_impl ( vv_.m_committed_size_in_bytes );
         // todo set up space in this.
         if constexpr ( not std::is_scalar<value_type>::value ) {
-            // std::memcpy ( m_begin, vv_.m_begin, vv_.m_end - vv_.begin );
             sax::memcpy_sse_16 ( m_begin, vv_.m_begin, vv_.m_committed_size_in_bytes );
         }
         else {
@@ -94,9 +93,7 @@ struct virtual_vector {
     // Size.
 
     private:
-    [[nodiscard]] constexpr size_type capacity_in_bytes ( ) noexcept {
-        return Capacity * ( win::page_size_in_bytes / sizeof ( value_type ) );
-    }
+    [[nodiscard]] constexpr size_type capacity_in_bytes ( ) noexcept { return Capacity * sizeof ( value_type ); }
     // m_committed_size_in_bytes is a variable.
     [[nodiscard]] size_type size_in_bytes ( ) const noexcept {
         return reinterpret_cast<char *> ( m_end ) - reinterpret_cast<char *> ( m_begin );
@@ -105,7 +102,6 @@ struct virtual_vector {
     public:
     [[nodiscard]] static constexpr size_type capacity ( ) noexcept { return Capacity; }
     [[nodiscard]] size_type committed ( ) const noexcept { return m_committed_size_in_bytes / sizeof ( value_type ); }
-    // [[nodiscard]] size_type size ( ) const noexcept { return size_in_bytes ( ) / sizeof ( value_type ); }
     [[nodiscard]] size_type size ( ) const noexcept {
         return reinterpret_cast<value_type *> ( m_end ) - reinterpret_cast<value_type *> ( m_begin );
     }
@@ -186,10 +182,10 @@ struct virtual_vector {
                                  m_committed_size_in_bytes, MEM_COMMIT, PAGE_READWRITE ) );
     }
 
-    static void_p commit_page_impl ( void_p ptr_, size_t size_ ) noexcept {
-        return win::virtual_alloc ( ptr_, size_, MEM_COMMIT, PAGE_READWRITE );
+    void commit_page_impl ( pointer ptr_, size_t size_ ) noexcept {
+        win::virtual_alloc ( ptr_, size_, MEM_COMMIT, PAGE_READWRITE );
     }
-    static void decommit_page_impl ( void_p ptr_, size_t size_ ) noexcept {
+    void decommit_page_impl ( pointer ptr_, size_t size_ ) noexcept {
         win::virtual_alloc ( ptr_, size_, MEM_DECOMMIT, PAGE_NOACCESS );
     }
 
