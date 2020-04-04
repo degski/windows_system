@@ -33,8 +33,12 @@ namespace sax {
 
 template<typename SizeType, typename = std::enable_if_t<std::is_unsigned<SizeType>::value>>
 struct growth_policy {
-    [[nodiscard]] static SizeType grow ( SizeType const & cap_in_bytes_ ) noexcept { return cap_in_bytes_ << 1; }
-    [[nodiscard]] static SizeType shrink ( SizeType const & cap_in_bytes_ ) noexcept { return cap_in_bytes_ >> 1; }
+    [[nodiscard]] static SizeType grow ( SizeType const & cap_in_bytes_ ) noexcept {
+        return cap_in_bytes_ + win::page_size_in_bytes;
+    }
+    [[nodiscard]] static SizeType shrink ( SizeType const & cap_in_bytes_ ) noexcept {
+        return cap_in_bytes_ - win::page_size_in_bytes;
+    }
 };
 
 template<typename ValueType, typename SizeType, SizeType Capacity, typename growth_policy = growth_policy<SizeType>>
@@ -80,7 +84,7 @@ struct virtual_vector {
         clear_impl ( );
         if ( m_begin ) {
             win::virtual_free ( m_begin, capacity_in_bytes ( ), MEM_RELEASE );
-            m_begin = nullptr;
+            m_end = m_begin = nullptr;
         }
         win::set_privilege ( SE_LOCK_MEMORY_NAME, false );
     }
