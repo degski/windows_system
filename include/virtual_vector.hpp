@@ -62,7 +62,12 @@ struct virtual_vector {
     using reverse_iterator       = pointer;
     using const_reverse_iterator = const_pointer;
 
-    virtual_vector ( ) noexcept = default;
+    virtual_vector ( ) noexcept {
+        if ( HEDLEY_UNLIKELY ( not win::set_privilege ( SE_LOCK_MEMORY_NAME, true ) ) )
+            std::cout << "Could not set lock page privilege to enabled." << nl;
+        m_end = m_begin = reinterpret_cast<pointer> (
+            win::virtual_alloc ( nullptr, capacity_in_bytes ( ), MEM_RESERVE, PAGE_READWRITE ) );
+    };
 
     virtual_vector ( virtual_vector const & vv_ ) {
         first_commit_page_impl ( vv_.m_committed_size_in_bytes );
@@ -114,14 +119,15 @@ struct virtual_vector {
 
     template<typename... Args>
     reference emplace_back ( Args &&... value_ ) noexcept {
-        if ( HEDLEY_LIKELY ( m_begin ) ) {
+        if ( HEDLEY_LIKELY ( m_committed_size_in_bytes ) ) {
             if ( HEDLEY_UNLIKELY ( size_in_bytes ( ) == m_committed_size_in_bytes ) ) {
-                commit_page_impl ( m_end, m_committed_size_in_bytes );
+                win::virtual_alloc ( m_end, m_committed_size_in_bytes, MEM_COMMIT, PAGE_READWRITE );
                 m_committed_size_in_bytes = growth_policy::grow ( m_committed_size_in_bytes );
             }
         }
         else {
-            first_commit_page_impl ( );
+            m_committed_size_in_bytes = win::page_size_in_bytes;
+            win::virtual_alloc ( m_end, m_committed_size_in_bytes, MEM_COMMIT, PAGE_READWRITE );
         }
         return *new ( m_end++ ) value_type{ std::forward<Args> ( value_ )... };
     }
@@ -176,22 +182,6 @@ struct virtual_vector {
     }
 
     private:
-    void first_commit_page_impl ( size_type page_size_in_bytes_ = 0u ) {
-        m_committed_size_in_bytes = win::page_size_in_bytes;
-        if ( HEDLEY_UNLIKELY ( not win::set_privilege ( SE_LOCK_MEMORY_NAME, true ) ) )
-            std::cout << "Could not set lock page privilege to enabled." << nl;
-        m_end = m_begin = reinterpret_cast<pointer> (
-            win::virtual_alloc ( win::virtual_alloc ( nullptr, capacity_in_bytes ( ), MEM_RESERVE, PAGE_READWRITE ),
-                                 m_committed_size_in_bytes, MEM_COMMIT, PAGE_READWRITE ) );
-    }
-
-    void commit_page_impl ( pointer ptr_, size_t size_ ) noexcept {
-        win::virtual_alloc ( ptr_, size_, MEM_COMMIT, PAGE_READWRITE );
-    }
-    void decommit_page_impl ( pointer ptr_, size_t size_ ) noexcept {
-        win::virtual_alloc ( ptr_, size_, MEM_DECOMMIT, PAGE_NOACCESS );
-    }
-
     void clear_impl ( ) noexcept {
         if ( m_committed_size_in_bytes ) {
             // Destroy objects.
@@ -203,13 +193,13 @@ struct virtual_vector {
             size_type com  = growth_policy::shrink ( committed ( ) );
             pointer rbegin = m_begin + com;
             for ( ; win::page_size_in_bytes == com; com = growth_policy::shrink ( com ), rbegin -= com )
-                decommit_page_impl ( rbegin, com );
-            decommit_page_impl ( m_begin, win::page_size_in_bytes );
+                win::virtual_alloc ( rbegin, com, MEM_DECOMMIT, PAGE_NOACCESS );
+            win::virtual_alloc ( m_begin, win::page_size_in_bytes, MEM_DECOMMIT, PAGE_NOACCESS );
         }
     }
 
     // Initialed with valid ptr to reserved memory and size = 0 (the number of committed pages).
     pointer m_begin = nullptr, m_end = nullptr;
-    size_type m_committed_size_in_bytes;
+    size_type m_committed_size_in_bytes = 0;
 };
 } // namespace sax
