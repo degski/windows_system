@@ -67,6 +67,7 @@ struct virtual_vector {
             std::cout << "Could not set lock page privilege to enabled." << nl;
         m_end = m_begin =
             reinterpret_cast<pointer> ( win::virtual_alloc ( nullptr, capacity_in_bytes ( ), MEM_RESERVE, PAGE_READWRITE ) );
+        m_committed_in_bytes = 0;
     };
 
     ~virtual_vector ( ) noexcept {
@@ -105,9 +106,9 @@ struct virtual_vector {
     template<typename... Args>
     reference emplace_back ( Args &&... value_ ) noexcept {
         if ( HEDLEY_UNLIKELY ( size_in_bytes ( ) == m_committed_in_bytes ) ) {
-            size_type new_commited = m_committed_in_bytes ? growth_policy::grow ( m_committed_in_bytes ) : win::page_size_in_bytes;
-            win::virtual_alloc ( m_end, new_commited - m_committed_in_bytes, MEM_COMMIT, PAGE_READWRITE );
-            m_committed_in_bytes = new_commited;
+            size_type cib = m_committed_in_bytes ? growth_policy::grow ( m_committed_in_bytes ) : win::page_size_in_bytes;
+            win::virtual_alloc ( m_end, cib - m_committed_in_bytes, MEM_COMMIT, PAGE_READWRITE );
+            m_committed_in_bytes = cib;
         }
         return *new ( m_end++ ) value_type{ std::forward<Args> ( value_ )... };
     }
@@ -161,7 +162,7 @@ struct virtual_vector {
     }
 
     private:
-    pointer m_begin = nullptr, m_end = nullptr;
-    size_type m_committed_in_bytes = 0;
+    pointer m_begin, m_end;
+    size_type m_committed_in_bytes;
 };
 } // namespace sax
