@@ -65,51 +65,36 @@ struct virtual_vector {
     virtual_vector ( ) noexcept {
         if ( HEDLEY_UNLIKELY ( not win::set_privilege ( SE_LOCK_MEMORY_NAME, true ) ) )
             std::cout << "Could not set lock page privilege to enabled." << nl;
-        m_end = m_begin = reinterpret_cast<pointer> (
-            win::virtual_alloc ( nullptr, capacity_in_bytes ( ), MEM_RESERVE, PAGE_READWRITE ) );
+        m_end = m_begin =
+            reinterpret_cast<pointer> ( win::virtual_alloc ( nullptr, capacity_in_bytes ( ), MEM_RESERVE, PAGE_READWRITE ) );
     };
 
-    virtual_vector ( virtual_vector const & vv_ ) {
-        first_commit_page_impl ( vv_.m_committed_size_in_bytes );
-        // todo set up space in this.
-        if constexpr ( not std::is_scalar<value_type>::value ) {
-            sax::memcpy_sse_16 ( m_begin, vv_.m_begin, vv_.m_committed_size_in_bytes );
-        }
-        else {
-            for ( auto const & v : vv_ )
-                new ( m_end++ ) value_type{ v };
-        }
-    }
-
-    virtual_vector ( virtual_vector && vv_ ) noexcept { std::swap ( std::move ( vv_ ), *this ); }
-
     ~virtual_vector ( ) noexcept {
-        clear_impl ( );
-        if ( m_begin ) {
-            win::virtual_free ( m_begin, capacity_in_bytes ( ), MEM_RELEASE );
-            m_end = m_begin = nullptr;
+        if constexpr ( not std::is_scalar<value_type>::value ) {
+            for ( auto & v : *this )
+                v.~value_type ( );
         }
-        win::set_privilege ( SE_LOCK_MEMORY_NAME, false );
-    }
-
-    void clear ( ) noexcept {
-        clear_impl ( );
-        m_end                     = m_begin;
-        m_committed_size_in_bytes = 0u;
+        if ( HEDLEY_LIKELY ( m_begin ) ) {
+            win::virtual_free ( m_begin, capacity_in_bytes ( ), MEM_RELEASE );
+            m_end = m_begin      = nullptr;
+            m_committed_in_bytes = 0;
+        }
+        if ( HEDLEY_UNLIKELY ( not win::set_privilege ( SE_LOCK_MEMORY_NAME, false ) ) )
+            std::cout << "Could not set lock page privilege to disabled." << nl;
     }
 
     // Size.
 
     private:
     [[nodiscard]] constexpr size_type capacity_in_bytes ( ) noexcept { return Capacity * sizeof ( value_type ); }
-    // m_committed_size_in_bytes is a variable.
+    [[nodiscard]] size_type committed_in_bytes ( ) const noexcept { return m_committed_in_bytes; }
     [[nodiscard]] size_type size_in_bytes ( ) const noexcept {
         return reinterpret_cast<char *> ( m_end ) - reinterpret_cast<char *> ( m_begin );
     }
 
     public:
     [[nodiscard]] constexpr size_type capacity ( ) noexcept { return Capacity; }
-    [[nodiscard]] size_type committed ( ) const noexcept { return m_committed_size_in_bytes / sizeof ( value_type ); }
+    [[nodiscard]] size_type committed ( ) const noexcept { return m_committed_in_bytes / sizeof ( value_type ); }
     [[nodiscard]] size_type size ( ) const noexcept {
         return reinterpret_cast<value_type *> ( m_end ) - reinterpret_cast<value_type *> ( m_begin );
     }
@@ -119,15 +104,10 @@ struct virtual_vector {
 
     template<typename... Args>
     reference emplace_back ( Args &&... value_ ) noexcept {
-        if ( HEDLEY_LIKELY ( m_committed_size_in_bytes ) ) {
-            if ( HEDLEY_UNLIKELY ( size_in_bytes ( ) == m_committed_size_in_bytes ) ) {
-                win::virtual_alloc ( m_end, m_committed_size_in_bytes, MEM_COMMIT, PAGE_READWRITE );
-                m_committed_size_in_bytes = growth_policy::grow ( m_committed_size_in_bytes );
-            }
-        }
-        else {
-            m_committed_size_in_bytes = win::page_size_in_bytes;
-            win::virtual_alloc ( m_end, m_committed_size_in_bytes, MEM_COMMIT, PAGE_READWRITE );
+        if ( HEDLEY_UNLIKELY ( size_in_bytes ( ) == m_committed_in_bytes ) ) {
+            size_type new_commited = m_committed_in_bytes ? growth_policy::grow ( m_committed_in_bytes ) : win::page_size_in_bytes;
+            win::virtual_alloc ( m_end, new_commited - m_committed_in_bytes, MEM_COMMIT, PAGE_READWRITE );
+            m_committed_in_bytes = new_commited;
         }
         return *new ( m_end++ ) value_type{ std::forward<Args> ( value_ )... };
     }
@@ -137,7 +117,6 @@ struct virtual_vector {
     }
 
     // TODO lowering growth factor when vector becomes really large as compared to free memory.
-    // TODO virtual_queue
 
     // Data.
 
@@ -182,24 +161,7 @@ struct virtual_vector {
     }
 
     private:
-    void clear_impl ( ) noexcept {
-        if ( m_committed_size_in_bytes ) {
-            // Destroy objects.
-            if constexpr ( not std::is_scalar<value_type>::value ) {
-                for ( auto & v : *this )
-                    v.~value_type ( );
-            }
-            // Tear-down committed.
-            size_type com  = growth_policy::shrink ( committed ( ) );
-            pointer rbegin = m_begin + com;
-            for ( ; win::page_size_in_bytes == com; com = growth_policy::shrink ( com ), rbegin -= com )
-                win::virtual_alloc ( rbegin, com, MEM_DECOMMIT, PAGE_NOACCESS );
-            win::virtual_alloc ( m_begin, win::page_size_in_bytes, MEM_DECOMMIT, PAGE_NOACCESS );
-        }
-    }
-
-    // Initialed with valid ptr to reserved memory and size = 0 (the number of committed pages).
     pointer m_begin = nullptr, m_end = nullptr;
-    size_type m_committed_size_in_bytes = 0;
+    size_type m_committed_in_bytes = 0;
 };
 } // namespace sax

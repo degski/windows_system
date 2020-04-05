@@ -663,3 +663,23 @@ template<typename T1, typename T2>
 bool operator!= ( vm_allocator<T1> const &, vm_allocator<T2> const & ) noexcept {
     return false;
 }
+
+/*
+
+    void clear_impl ( ) noexcept {
+        if ( m_committed_size_in_bytes ) {
+            // Destroy objects.
+            if constexpr ( not std::is_scalar<value_type>::value ) {
+                for ( auto & v : *this )
+                    v.~value_type ( );
+            }
+            // Tear-down committed.
+            size_type com  = growth_policy::shrink ( committed ( ) );
+            pointer rbegin = m_begin + com;
+            for ( ; win::page_size_in_bytes == com; com = growth_policy::shrink ( com ), rbegin -= com )
+                win::virtual_alloc ( rbegin, com, MEM_DECOMMIT, PAGE_NOACCESS );
+            win::virtual_alloc ( m_begin, win::page_size_in_bytes, MEM_DECOMMIT, PAGE_NOACCESS );
+        }
+    }
+
+*/
