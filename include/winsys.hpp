@@ -68,7 +68,7 @@ std::string last_error ( ) noexcept {
     return token_handle;
 }
 
-[[maybe_unused]] inline bool set_privilege_impl ( void * token,                         // access token handle
+[[maybe_unused]] inline void set_privilege_impl ( void * token,                         // access token handle
                                                   wchar_t const * const privilege_name, // name of privilege to enable/disable
                                                   bool enable_privilige ) {    // to enable or disable privilege
     // https://docs.microsoft.com/en-us/windows/win32/secauthz/enabling-and-disabling-privileges-in-c--
@@ -76,10 +76,8 @@ std::string last_error ( ) noexcept {
     LUID luid;
     if ( HEDLEY_UNLIKELY ( not LookupPrivilegeValue ( nullptr,                        // lookup privilege on local system
                                                       privilege_name,                 // privilege to lookup
-                                                      std::addressof ( luid ) ) ) ) { // receives LUID of privilege
+                                                      std::addressof ( luid ) ) ) )  // receives LUID of privilege
         throw std::runtime_error ( "LookupPrivilegeValue error: " + last_error ( ) );
-        return false;
-    }
     tp.PrivilegeCount       = 1;
     tp.Privileges[ 0 ].Luid = luid;
     if ( HEDLEY_LIKELY ( enable_privilige ) )
@@ -88,20 +86,15 @@ std::string last_error ( ) noexcept {
         tp.Privileges[ 0 ].Attributes = 0;
     // Enable the privilege or disable all privileges.
     if ( HEDLEY_UNLIKELY (
-             not AdjustTokenPrivileges ( token, false, std::addressof ( tp ), sizeof ( TOKEN_PRIVILEGES ), nullptr, nullptr ) ) ) {
+             not AdjustTokenPrivileges ( token, false, std::addressof ( tp ), sizeof ( TOKEN_PRIVILEGES ), nullptr, nullptr ) ) )
         throw std::runtime_error ( "AdjustTokenPrivileges error: " + last_error ( ) );
-        return false;
-    }
-    if ( HEDLEY_UNLIKELY ( GetLastError ( ) == ERROR_NOT_ALL_ASSIGNED ) ) {
+    if ( HEDLEY_UNLIKELY ( GetLastError ( ) == ERROR_NOT_ALL_ASSIGNED ) )
         throw std::runtime_error (  "the token does not have the specified privilege" );
-        return false;
-    }
-    return true;
 }
 
-[[maybe_unused]] inline bool set_privilege ( wchar_t const * const privilege_name, // name of privilege to enable/disable
-                                             bool enable_privilige ) noexcept {
-    return set_privilege_impl ( get_token_handle ( ), privilege_name, enable_privilige );
+[[maybe_unused]] inline void set_privilege ( wchar_t const * const privilege_name, // name of privilege to enable/disable
+                                             bool enable_privilige ) {
+    set_privilege_impl ( get_token_handle ( ), privilege_name, enable_privilige );
 }
 
 [[nodiscard]] inline size_t large_page_minimum ( ) noexcept { return GetLargePageMinimum ( ); }

@@ -64,8 +64,7 @@ struct virtual_vector {
     using const_reverse_iterator = const_pointer;
 
     virtual_vector ( ) {
-        if ( HEDLEY_UNLIKELY ( not win::set_privilege ( SE_LOCK_MEMORY_NAME, true ) ) )
-            throw std::runtime_error ( "could not set lock page privilege to enabled" );
+        win::set_privilege ( SE_LOCK_MEMORY_NAME, true );
         m_end = m_begin =
             reinterpret_cast<pointer> ( win::virtual_alloc ( nullptr, capacity_b ( ), MEM_RESERVE, PAGE_READWRITE ) );
         m_committed_b = 0;
@@ -81,8 +80,7 @@ struct virtual_vector {
             m_end = m_begin      = nullptr;
             m_committed_b = 0;
         }
-        if ( HEDLEY_UNLIKELY ( not win::set_privilege ( SE_LOCK_MEMORY_NAME, false ) ) )
-            throw std::runtime_error ( "could not set lock page privilege to disabled" );
+        win::set_privilege ( SE_LOCK_MEMORY_NAME, false );
     }
 
     // Size.

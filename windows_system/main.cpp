@@ -71,20 +71,17 @@ struct windows_system {
     // 2'097'152 = 200MB = 2 ^ 21
     //    65'536 =  64KB = 2 ^ 16
 
-    ~windows_system ( ) noexcept {
+    ~windows_system ( ) noexcept ( false ) {
         if ( HEDLEY_LIKELY ( m_reserved_pointer ) ) {
             sax::win::virtual_free ( m_reserved_pointer, m_reserved_size_b, MEM_RELEASE );
-            m_reserved_pointer       = nullptr;
-            m_reserved_size_b = 0u;
+            m_reserved_pointer = nullptr;
+            m_reserved_size_b  = 0u;
         }
         sax::win::set_privilege ( SE_LOCK_MEMORY_NAME, false );
     }
 
-    [[nodiscard]] void_p reserve_and_commit_page ( size_t const capacity_b_ ) noexcept {
-        if ( HEDLEY_UNLIKELY ( not sax::win::set_privilege ( SE_LOCK_MEMORY_NAME, true ) ) ) {
-            std::cout << "Could not set lock page privilege to enabled." << nl;
-            return nullptr;
-        }
+    [[nodiscard]] void_p reserve_and_commit_page ( size_t const capacity_b_ ) {
+        sax::win::set_privilege ( SE_LOCK_MEMORY_NAME, true );
         if constexpr ( HAVE_LARGE_PAGES ) {
             m_reserved_pointer =
                 sax::win::virtual_alloc ( nullptr, capacity_b_, MEM_RESERVE | MEM_COMMIT | MEM_LARGE_PAGES, PAGE_READWRITE );
@@ -92,7 +89,7 @@ struct windows_system {
         else {
             m_reserved_pointer =
                 sax::win::virtual_alloc ( sax::win::virtual_alloc ( nullptr, capacity_b_, MEM_RESERVE, PAGE_READWRITE ),
-                                     page_size_b, MEM_COMMIT, PAGE_READWRITE );
+                                          page_size_b, MEM_COMMIT, PAGE_READWRITE );
         }
         m_reserved_size_b = capacity_b_;
         return m_reserved_pointer;
@@ -102,8 +99,8 @@ struct windows_system {
         if constexpr ( not HAVE_LARGE_PAGES ) {
             if ( m_reserved_pointer ) {
                 sax::win::virtual_free ( m_reserved_pointer, m_reserved_size_b, MEM_RELEASE );
-                m_reserved_pointer       = nullptr;
-                m_reserved_size_b = 0u;
+                m_reserved_pointer = nullptr;
+                m_reserved_size_b  = 0u;
             }
         }
         else {
@@ -136,8 +133,8 @@ struct windows_system {
     }
 
     private:
-    void_p m_reserved_pointer       = nullptr;
-    size_t m_reserved_size_b = 0u;
+    void_p m_reserved_pointer = nullptr;
+    size_t m_reserved_size_b  = 0u;
 
     public:
     static size_t const page_size_b;
@@ -238,7 +235,7 @@ struct virtual_vector {
     void clear ( ) noexcept {
         clear_impl ( );
         // Reset to default state.
-        m_end                = m_begin;
+        m_end         = m_begin;
         m_committed_b = 0u;
     }
 
