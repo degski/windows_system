@@ -48,7 +48,7 @@ inline SYSTEM_INFO get_system_information ( ) noexcept {
 
 inline SYSTEM_INFO const info = get_system_information ( );
 
-inline constexpr std::size_t page_size_ib = 65'536ull;
+inline constexpr std::size_t page_size_b = 65'536ull;
 
 std::string last_error ( ) noexcept {
     std::array<char, 16> str{ };
