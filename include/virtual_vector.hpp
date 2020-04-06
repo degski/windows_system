@@ -138,10 +138,18 @@ struct virtual_vector {
     [[nodiscard]] reference back ( ) noexcept { return const_cast<reference> ( std::as_const ( *this ).back ( ) ); }
 
     [[nodiscard]] const_reference at ( size_type const i_ ) const {
-        if ( HEDLEY_LIKELY ( 0 <= i_ and i_ < size ( ) ) )
-            return m_begin[ i_ ];
-        else
-            throw std::runtime_error ( "index out of bounds" );
+        if constexpr ( std::is_signed<size_type>::value ) {
+            if ( HEDLEY_LIKELY ( 0 <= i_ and i_ < size ( ) ) )
+                return m_begin[ i_ ];
+            else
+                throw std::runtime_error ( "index out of bounds" );
+        }
+        else {
+            if ( HEDLEY_LIKELY ( i_ < size ( ) ) )
+                return m_begin[ i_ ];
+            else
+                throw std::runtime_error ( "index out of bounds" );
+        }
     }
     [[nodiscard]] reference at ( size_type const i_ ) { return const_cast<reference> ( std::as_const ( *this ).at ( i_ ) ); }
 
