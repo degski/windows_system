@@ -34,12 +34,8 @@ namespace sax {
 
 template<typename SizeType, typename = std::enable_if_t<std::is_unsigned<SizeType>::value>>
 struct growth_policy {
-    [[nodiscard]] static SizeType grow ( SizeType const & cap_b_ ) noexcept {
-        return cap_b_ + win::page_size_b;
-    }
-    [[nodiscard]] static SizeType shrink ( SizeType const & cap_b_ ) noexcept {
-        return cap_b_ - win::page_size_b;
-    }
+    [[nodiscard]] static SizeType grow ( SizeType const & cap_b_ ) noexcept { return cap_b_ + win::page_size_b; }
+    [[nodiscard]] static SizeType shrink ( SizeType const & cap_b_ ) noexcept { return cap_b_ - win::page_size_b; }
 };
 
 template<typename ValueType, typename SizeType, SizeType Capacity, typename growth_policy = growth_policy<SizeType>>
@@ -65,20 +61,19 @@ struct virtual_vector {
 
     virtual_vector ( ) {
         win::set_privilege ( SE_LOCK_MEMORY_NAME, true );
-        m_end = m_begin =
-            reinterpret_cast<pointer> ( win::virtual_alloc ( nullptr, capacity_b ( ), MEM_RESERVE, PAGE_READWRITE ) );
-        m_committed_b = 0;
+        m_end = m_begin = reinterpret_cast<pointer> ( win::virtual_alloc ( nullptr, capacity_b ( ), MEM_RESERVE, PAGE_READWRITE ) );
+        m_committed_b   = 0;
     };
 
     ~virtual_vector ( ) noexcept ( false ) {
-        if constexpr ( not std::is_scalar<value_type>::value ) {
+        if constexpr ( not std::is_trivial<value_type>::value ) {
             for ( auto & v : *this )
                 v.~value_type ( );
         }
         if ( HEDLEY_LIKELY ( m_begin ) ) {
             win::virtual_free ( m_begin, capacity_b ( ), MEM_RELEASE );
-            m_end = m_begin      = nullptr;
-            m_committed_b = 0;
+            m_end = m_begin = nullptr;
+            m_committed_b   = 0;
         }
         win::set_privilege ( SE_LOCK_MEMORY_NAME, false );
     }
