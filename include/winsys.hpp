@@ -36,7 +36,7 @@
 
 #pragma comment( lib, "Advapi32.lib" )
 
-namespace win {
+namespace sax::win {
 
 inline SYSTEM_INFO get_system_information ( ) noexcept {
     SYSTEM_INFO si;

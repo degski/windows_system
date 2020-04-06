@@ -73,25 +73,25 @@ struct windows_system {
 
     ~windows_system ( ) noexcept {
         if ( HEDLEY_LIKELY ( m_reserved_pointer ) ) {
-            win::virtual_free ( m_reserved_pointer, m_reserved_size_in_bytes, MEM_RELEASE );
+            sax::win::virtual_free ( m_reserved_pointer, m_reserved_size_in_bytes, MEM_RELEASE );
             m_reserved_pointer       = nullptr;
             m_reserved_size_in_bytes = 0u;
         }
-        win::set_privilege ( SE_LOCK_MEMORY_NAME, false );
+        sax::win::set_privilege ( SE_LOCK_MEMORY_NAME, false );
     }
 
     [[nodiscard]] void_p reserve_and_commit_page ( size_t const capacity_in_bytes_ ) noexcept {
-        if ( HEDLEY_UNLIKELY ( not win::set_privilege ( SE_LOCK_MEMORY_NAME, true ) ) ) {
+        if ( HEDLEY_UNLIKELY ( not sax::win::set_privilege ( SE_LOCK_MEMORY_NAME, true ) ) ) {
             std::cout << "Could not set lock page privilege to enabled." << nl;
             return nullptr;
         }
         if constexpr ( HAVE_LARGE_PAGES ) {
             m_reserved_pointer =
-                win::virtual_alloc ( nullptr, capacity_in_bytes_, MEM_RESERVE | MEM_COMMIT | MEM_LARGE_PAGES, PAGE_READWRITE );
+                sax::win::virtual_alloc ( nullptr, capacity_in_bytes_, MEM_RESERVE | MEM_COMMIT | MEM_LARGE_PAGES, PAGE_READWRITE );
         }
         else {
             m_reserved_pointer =
-                win::virtual_alloc ( win::virtual_alloc ( nullptr, capacity_in_bytes_, MEM_RESERVE, PAGE_READWRITE ),
+                sax::win::virtual_alloc ( sax::win::virtual_alloc ( nullptr, capacity_in_bytes_, MEM_RESERVE, PAGE_READWRITE ),
                                      page_size_in_bytes, MEM_COMMIT, PAGE_READWRITE );
         }
         m_reserved_size_in_bytes = capacity_in_bytes_;
@@ -101,7 +101,7 @@ struct windows_system {
     void free_reserved_pages ( ) noexcept {
         if constexpr ( not HAVE_LARGE_PAGES ) {
             if ( m_reserved_pointer ) {
-                win::virtual_free ( m_reserved_pointer, m_reserved_size_in_bytes, MEM_RELEASE );
+                sax::win::virtual_free ( m_reserved_pointer, m_reserved_size_in_bytes, MEM_RELEASE );
                 m_reserved_pointer       = nullptr;
                 m_reserved_size_in_bytes = 0u;
             }
@@ -113,20 +113,20 @@ struct windows_system {
 
     template<bool HLP = HAVE_LARGE_PAGES, typename = std::enable_if_t<not HLP>>
     static void_p commit_page ( void_p ptr_, size_t size_ ) noexcept {
-        return win::virtual_alloc ( ptr_, size_, MEM_COMMIT, PAGE_READWRITE );
+        return sax::win::virtual_alloc ( ptr_, size_, MEM_COMMIT, PAGE_READWRITE );
     }
     template<bool HLP = HAVE_LARGE_PAGES, typename = std::enable_if_t<not HLP>>
     static void decommit_page ( void_p ptr_, size_t size_ ) noexcept {
-        win::virtual_alloc ( ptr_, size_, MEM_DECOMMIT, PAGE_NOACCESS );
+        sax::win::virtual_alloc ( ptr_, size_, MEM_DECOMMIT, PAGE_NOACCESS );
     }
 
     template<bool HLP = HAVE_LARGE_PAGES, typename = std::enable_if_t<not HLP>>
     static void_p reset_page ( void_p ptr_, size_t size_ ) noexcept {
-        return win::virtual_alloc ( ptr_, size_, MEM_RESET, PAGE_NOACCESS );
+        return sax::win::virtual_alloc ( ptr_, size_, MEM_RESET, PAGE_NOACCESS );
     }
     template<bool HLP = HAVE_LARGE_PAGES, typename = std::enable_if_t<not HLP>>
     static void reset_undo_page ( void_p ptr_, size_t size_ ) noexcept {
-        win::virtual_alloc ( ptr_, size_, MEM_RESET_UNDO, PAGE_READWRITE );
+        sax::win::virtual_alloc ( ptr_, size_, MEM_RESET_UNDO, PAGE_READWRITE );
     }
 
     template<typename T>
@@ -143,7 +143,7 @@ struct windows_system {
     static size_t const page_size_in_bytes;
 };
 template<bool HAVE_LARGE_PAGES>
-size_t const windows_system<HAVE_LARGE_PAGES>::page_size_in_bytes = HAVE_LARGE_PAGES ? win::large_page_minimum ( ) : 65'536ull;
+size_t const windows_system<HAVE_LARGE_PAGES>::page_size_in_bytes = HAVE_LARGE_PAGES ? sax::win::large_page_minimum ( ) : 65'536ull;
 
 using sys = windows_system<false>;
 
@@ -449,7 +449,7 @@ struct comp_less {
 /*
 Windows http://www.roylongbottom.org.uk/busspd2k.zip
 
- xx = (int *)win::virtual_alloc(nullptr, useMemK*1024+256, MEM_COMMIT, PAGE_READWRITE);
+ xx = (int *)sax::win::virtual_alloc(nullptr, useMemK*1024+256, MEM_COMMIT, PAGE_READWRITE);
 
 Linux http://www.roylongbottom.org.uk/memory_benchmarks.tar.gz
 
@@ -676,9 +676,9 @@ bool operator!= ( vm_allocator<T1> const &, vm_allocator<T2> const & ) noexcept 
             // Tear-down committed.
             size_type com  = growth_policy::shrink ( committed ( ) );
             pointer rbegin = m_begin + com;
-            for ( ; win::page_size_in_bytes == com; com = growth_policy::shrink ( com ), rbegin -= com )
-                win::virtual_alloc ( rbegin, com, MEM_DECOMMIT, PAGE_NOACCESS );
-            win::virtual_alloc ( m_begin, win::page_size_in_bytes, MEM_DECOMMIT, PAGE_NOACCESS );
+            for ( ; sax::win::page_size_in_bytes == com; com = growth_policy::shrink ( com ), rbegin -= com )
+                sax::win::virtual_alloc ( rbegin, com, MEM_DECOMMIT, PAGE_NOACCESS );
+            sax::win::virtual_alloc ( m_begin, sax::win::page_size_in_bytes, MEM_DECOMMIT, PAGE_NOACCESS );
         }
     }
 
