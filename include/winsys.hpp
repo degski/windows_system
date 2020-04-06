@@ -104,8 +104,7 @@ inline constexpr std::size_t page_size_in_bytes = 65'536ull;
 [[maybe_unused]] inline BOOL virtual_free ( LPVOID lpAddress, SIZE_T dwSize, DWORD dwFreeType ) noexcept {
     return VirtualFree ( lpAddress, dwSize, dwFreeType );
 }
-
-} // namespace win
+} // namespace sax::win
 
 // using struct _SYSTEM_INFO {
 //      union {

@@ -112,9 +112,7 @@ struct virtual_vector {
         }
         return *new ( m_end++ ) value_type{ std::forward<Args> ( value_ )... };
     }
-    reference push_back ( const_reference value_ ) noexcept {
-        return emplace_back ( value_type{ value_ } );
-    }
+    reference push_back ( const_reference value_ ) noexcept { return emplace_back ( value_type{ value_ } ); }
 
     // TODO lowering growth factor when vector becomes really large as compared to free memory.
 
