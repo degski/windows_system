@@ -34,11 +34,11 @@ namespace sax {
 
 template<typename SizeType, typename = std::enable_if_t<std::is_unsigned<SizeType>::value>>
 struct growth_policy {
-    [[nodiscard]] static SizeType grow ( SizeType const & cap_in_bytes_ ) noexcept {
-        return cap_in_bytes_ + win::page_size_in_bytes;
+    [[nodiscard]] static SizeType grow ( SizeType const & cap_ib_ ) noexcept {
+        return cap_ib_ + win::page_size_ib;
     }
-    [[nodiscard]] static SizeType shrink ( SizeType const & cap_in_bytes_ ) noexcept {
-        return cap_in_bytes_ - win::page_size_in_bytes;
+    [[nodiscard]] static SizeType shrink ( SizeType const & cap_ib_ ) noexcept {
+        return cap_ib_ - win::page_size_ib;
     }
 };
 
@@ -65,10 +65,10 @@ struct virtual_vector {
 
     virtual_vector ( ) {
         if ( HEDLEY_UNLIKELY ( not win::set_privilege ( SE_LOCK_MEMORY_NAME, true ) ) )
-            throw std::runtime_error ( "Could not set lock page privilege to enabled." );
+            throw std::runtime_error ( "could not set lock page privilege to enabled" );
         m_end = m_begin =
-            reinterpret_cast<pointer> ( win::virtual_alloc ( nullptr, capacity_in_bytes ( ), MEM_RESERVE, PAGE_READWRITE ) );
-        m_committed_in_bytes = 0;
+            reinterpret_cast<pointer> ( win::virtual_alloc ( nullptr, capacity_ib ( ), MEM_RESERVE, PAGE_READWRITE ) );
+        m_committed_ib = 0;
     };
 
     ~virtual_vector ( ) noexcept ( false ) {
@@ -77,26 +77,26 @@ struct virtual_vector {
                 v.~value_type ( );
         }
         if ( HEDLEY_LIKELY ( m_begin ) ) {
-            win::virtual_free ( m_begin, capacity_in_bytes ( ), MEM_RELEASE );
+            win::virtual_free ( m_begin, capacity_ib ( ), MEM_RELEASE );
             m_end = m_begin      = nullptr;
-            m_committed_in_bytes = 0;
+            m_committed_ib = 0;
         }
         if ( HEDLEY_UNLIKELY ( not win::set_privilege ( SE_LOCK_MEMORY_NAME, false ) ) )
-            throw std::runtime_error ( "Could not set lock page privilege to disabled." );
+            throw std::runtime_error ( "could not set lock page privilege to disabled" );
     }
 
     // Size.
 
     private:
-    [[nodiscard]] constexpr size_type capacity_in_bytes ( ) noexcept { return Capacity * sizeof ( value_type ); }
-    [[nodiscard]] size_type committed_in_bytes ( ) const noexcept { return m_committed_in_bytes; }
-    [[nodiscard]] size_type size_in_bytes ( ) const noexcept {
+    [[nodiscard]] constexpr size_type capacity_ib ( ) noexcept { return Capacity * sizeof ( value_type ); }
+    [[nodiscard]] size_type committed_ib ( ) const noexcept { return m_committed_ib; }
+    [[nodiscard]] size_type size_ib ( ) const noexcept {
         return reinterpret_cast<char *> ( m_end ) - reinterpret_cast<char *> ( m_begin );
     }
 
     public:
     [[nodiscard]] constexpr size_type capacity ( ) noexcept { return Capacity; }
-    [[nodiscard]] size_type committed ( ) const noexcept { return m_committed_in_bytes / sizeof ( value_type ); }
+    [[nodiscard]] size_type committed ( ) const noexcept { return m_committed_ib / sizeof ( value_type ); }
     [[nodiscard]] size_type size ( ) const noexcept {
         return reinterpret_cast<value_type *> ( m_end ) - reinterpret_cast<value_type *> ( m_begin );
     }
@@ -106,10 +106,10 @@ struct virtual_vector {
 
     template<typename... Args>
     reference emplace_back ( Args &&... value_ ) noexcept {
-        if ( HEDLEY_UNLIKELY ( size_in_bytes ( ) == m_committed_in_bytes ) ) {
-            size_type cib = m_committed_in_bytes ? growth_policy::grow ( m_committed_in_bytes ) : win::page_size_in_bytes;
-            win::virtual_alloc ( m_end, cib - m_committed_in_bytes, MEM_COMMIT, PAGE_READWRITE );
-            m_committed_in_bytes = cib;
+        if ( HEDLEY_UNLIKELY ( size_ib ( ) == m_committed_ib ) ) {
+            size_type cib = m_committed_ib ? growth_policy::grow ( m_committed_ib ) : win::page_size_ib;
+            win::virtual_alloc ( m_end, cib - m_committed_ib, MEM_COMMIT, PAGE_READWRITE );
+            m_committed_ib = cib;
         }
         return *new ( m_end++ ) value_type{ std::forward<Args> ( value_ )... };
     }
@@ -148,7 +148,7 @@ struct virtual_vector {
         if ( HEDLEY_LIKELY ( 0 <= i_ and i_ < size ( ) ) )
             return m_begin[ i_ ];
         else
-            throw std::runtime_error ( "virtual_vector: index out of bounds" );
+            throw std::runtime_error ( "index out of bounds" );
     }
     [[nodiscard]] reference at ( size_type const i_ ) { return const_cast<reference> ( std::as_const ( *this ).at ( i_ ) ); }
 
@@ -159,7 +159,7 @@ struct virtual_vector {
 
     private:
     pointer m_begin, m_end;
-    size_type m_committed_in_bytes;
+    size_type m_committed_ib;
 };
 
 } // namespace sax

@@ -73,37 +73,37 @@ struct windows_system {
 
     ~windows_system ( ) noexcept {
         if ( HEDLEY_LIKELY ( m_reserved_pointer ) ) {
-            sax::win::virtual_free ( m_reserved_pointer, m_reserved_size_in_bytes, MEM_RELEASE );
+            sax::win::virtual_free ( m_reserved_pointer, m_reserved_size_ib, MEM_RELEASE );
             m_reserved_pointer       = nullptr;
-            m_reserved_size_in_bytes = 0u;
+            m_reserved_size_ib = 0u;
         }
         sax::win::set_privilege ( SE_LOCK_MEMORY_NAME, false );
     }
 
-    [[nodiscard]] void_p reserve_and_commit_page ( size_t const capacity_in_bytes_ ) noexcept {
+    [[nodiscard]] void_p reserve_and_commit_page ( size_t const capacity_ib_ ) noexcept {
         if ( HEDLEY_UNLIKELY ( not sax::win::set_privilege ( SE_LOCK_MEMORY_NAME, true ) ) ) {
             std::cout << "Could not set lock page privilege to enabled." << nl;
             return nullptr;
         }
         if constexpr ( HAVE_LARGE_PAGES ) {
             m_reserved_pointer =
-                sax::win::virtual_alloc ( nullptr, capacity_in_bytes_, MEM_RESERVE | MEM_COMMIT | MEM_LARGE_PAGES, PAGE_READWRITE );
+                sax::win::virtual_alloc ( nullptr, capacity_ib_, MEM_RESERVE | MEM_COMMIT | MEM_LARGE_PAGES, PAGE_READWRITE );
         }
         else {
             m_reserved_pointer =
-                sax::win::virtual_alloc ( sax::win::virtual_alloc ( nullptr, capacity_in_bytes_, MEM_RESERVE, PAGE_READWRITE ),
-                                     page_size_in_bytes, MEM_COMMIT, PAGE_READWRITE );
+                sax::win::virtual_alloc ( sax::win::virtual_alloc ( nullptr, capacity_ib_, MEM_RESERVE, PAGE_READWRITE ),
+                                     page_size_ib, MEM_COMMIT, PAGE_READWRITE );
         }
-        m_reserved_size_in_bytes = capacity_in_bytes_;
+        m_reserved_size_ib = capacity_ib_;
         return m_reserved_pointer;
     }
 
     void free_reserved_pages ( ) noexcept {
         if constexpr ( not HAVE_LARGE_PAGES ) {
             if ( m_reserved_pointer ) {
-                sax::win::virtual_free ( m_reserved_pointer, m_reserved_size_in_bytes, MEM_RELEASE );
+                sax::win::virtual_free ( m_reserved_pointer, m_reserved_size_ib, MEM_RELEASE );
                 m_reserved_pointer       = nullptr;
-                m_reserved_size_in_bytes = 0u;
+                m_reserved_size_ib = 0u;
             }
         }
         else {
@@ -131,26 +131,26 @@ struct windows_system {
 
     template<typename T>
     constexpr size_t type_page_size ( size_t large_page_size_ = 0u ) noexcept {
-        assert ( ( page_size_in_bytes / sizeof ( T ) ) * sizeof ( T ) == page_size_in_bytes );
-        return page_size_in_bytes / sizeof ( T );
+        assert ( ( page_size_ib / sizeof ( T ) ) * sizeof ( T ) == page_size_ib );
+        return page_size_ib / sizeof ( T );
     }
 
     private:
     void_p m_reserved_pointer       = nullptr;
-    size_t m_reserved_size_in_bytes = 0u;
+    size_t m_reserved_size_ib = 0u;
 
     public:
-    static size_t const page_size_in_bytes;
+    static size_t const page_size_ib;
 };
 template<bool HAVE_LARGE_PAGES>
-size_t const windows_system<HAVE_LARGE_PAGES>::page_size_in_bytes = HAVE_LARGE_PAGES ? sax::win::large_page_minimum ( ) : 65'536ull;
+size_t const windows_system<HAVE_LARGE_PAGES>::page_size_ib = HAVE_LARGE_PAGES ? sax::win::large_page_minimum ( ) : 65'536ull;
 
 using sys = windows_system<false>;
 
 template<typename SizeType, typename = std::enable_if_t<std::is_unsigned<SizeType>::value>>
 struct growth_policy {
-    [[nodiscard]] static SizeType grow ( SizeType const & cap_in_bytes_ ) noexcept { return cap_in_bytes_ << 1; }
-    [[nodiscard]] static SizeType shrink ( SizeType const & cap_in_bytes_ ) noexcept { return cap_in_bytes_ >> 1; }
+    [[nodiscard]] static SizeType grow ( SizeType const & cap_ib_ ) noexcept { return cap_ib_ << 1; }
+    [[nodiscard]] static SizeType shrink ( SizeType const & cap_ib_ ) noexcept { return cap_ib_ >> 1; }
 };
 
 // Overload std::is_scalar for your type if it can be copied with std::memcpy.
@@ -179,18 +179,18 @@ struct virtual_vector {
     virtual_vector ( ) noexcept = default;
 
     private:
-    void first_commit_impl ( size_type page_size_in_bytes_ = 0u ) {
-        m_committed_in_bytes = page_size_in_bytes_ ? page_size_in_bytes_ : sys::page_size_in_bytes;
+    void first_commit_impl ( size_type page_size_ib_ = 0u ) {
+        m_committed_ib = page_size_ib_ ? page_size_ib_ : sys::page_size_ib;
         m_end = m_begin = reinterpret_cast<pointer> ( m_sys.reserve_and_commit_page ( Capacity * sizeof ( value_type ) ) );
     }
 
     public:
     virtual_vector ( virtual_vector const & vv_ ) {
-        first_commit_impl ( vv_.m_committed_in_bytes );
+        first_commit_impl ( vv_.m_committed_ib );
         // todo set up space in this.
         if constexpr ( not std::is_scalar<value_type>::value ) {
             // std::memcpy ( m_begin, vv_.m_begin, vv_.m_end - vv_.begin );
-            sax::memcpy_sse_16 ( m_begin, vv_.m_begin, vv_.m_committed_in_bytes );
+            sax::memcpy_sse_16 ( m_begin, vv_.m_begin, vv_.m_committed_ib );
         }
         else {
             for ( auto const & v : vv_ )
@@ -206,25 +206,25 @@ struct virtual_vector {
     }
 
     private:
-    void push_up_committed ( size_type const to_commit_size_in_bytes_ ) noexcept {
-        size_type cib = m_committed_in_bytes;
+    void push_up_committed ( size_type const to_commit_size_ib_ ) noexcept {
+        size_type cib = m_committed_ib;
         pointer begin = m_end;
-        pointer end   = m_begin + to_commit_size_in_bytes_ / sizeof ( value_type );
+        pointer end   = m_begin + to_commit_size_ib_ / sizeof ( value_type );
         for ( ; begin == end; cib = growth_policy::grow ( cib ), begin += cib )
             sys::commit_page ( begin, cib );
     }
-    void tear_down_committed ( size_type const to_commit_size_in_bytes_ = 0u ) noexcept {
+    void tear_down_committed ( size_type const to_commit_size_ib_ = 0u ) noexcept {
         size_type com                = growth_policy::shrink ( committed ( ) );
         pointer rbegin               = m_begin + com;
-        size_type const to_committed = std::max ( sys::page_size_in_bytes, to_commit_size_in_bytes_ );
+        size_type const to_committed = std::max ( sys::page_size_ib, to_commit_size_ib_ );
         for ( ; to_committed == com; com = growth_policy::shrink ( com ), rbegin -= com )
             sys::decommit_page ( rbegin, com );
-        if ( not to_commit_size_in_bytes_ )
-            sys::decommit_page ( m_begin, sys::page_size_in_bytes );
+        if ( not to_commit_size_ib_ )
+            sys::decommit_page ( m_begin, sys::page_size_ib );
     }
 
     void clear_impl ( ) noexcept {
-        if ( m_committed_in_bytes ) {
+        if ( m_committed_ib ) {
             // Destroy objects.
             if constexpr ( not std::is_scalar<value_type>::value ) {
                 for ( auto & v : *this )
@@ -239,22 +239,22 @@ struct virtual_vector {
         clear_impl ( );
         // Reset to default state.
         m_end                = m_begin;
-        m_committed_in_bytes = 0u;
+        m_committed_ib = 0u;
     }
 
     // Size.
 
     private:
-    [[nodiscard]] constexpr size_type capacity_in_bytes ( ) noexcept { return Capacity * m_sys.type_page_size<value_type> ( ); }
-    // m_committed_in_bytes is a variable.
-    [[nodiscard]] size_type size_in_bytes ( ) const noexcept {
+    [[nodiscard]] constexpr size_type capacity_ib ( ) noexcept { return Capacity * m_sys.type_page_size<value_type> ( ); }
+    // m_committed_ib is a variable.
+    [[nodiscard]] size_type size_ib ( ) const noexcept {
         return reinterpret_cast<char *> ( m_end ) - reinterpret_cast<char *> ( m_begin );
     }
 
     public:
     [[nodiscard]] static constexpr size_type capacity ( ) noexcept { return Capacity; }
-    [[nodiscard]] size_type committed ( ) const noexcept { return m_committed_in_bytes / sizeof ( value_type ); }
-    // [[nodiscard]] size_type size ( ) const noexcept { return size_in_bytes ( ) / sizeof ( value_type ); }
+    [[nodiscard]] size_type committed ( ) const noexcept { return m_committed_ib / sizeof ( value_type ); }
+    // [[nodiscard]] size_type size ( ) const noexcept { return size_ib ( ) / sizeof ( value_type ); }
     [[nodiscard]] size_type size ( ) const noexcept {
         return reinterpret_cast<value_type *> ( m_end ) - reinterpret_cast<value_type *> ( m_begin );
     }
@@ -265,9 +265,9 @@ struct virtual_vector {
     template<typename... Args>
     reference emplace_back ( Args &&... value_ ) noexcept {
         if ( HEDLEY_LIKELY ( m_begin ) ) {
-            if ( HEDLEY_UNLIKELY ( size_in_bytes ( ) == m_committed_in_bytes ) ) {
-                sys::commit_page ( m_end, m_committed_in_bytes );
-                m_committed_in_bytes = growth_policy::grow ( m_committed_in_bytes );
+            if ( HEDLEY_UNLIKELY ( size_ib ( ) == m_committed_ib ) ) {
+                sys::commit_page ( m_end, m_committed_ib );
+                m_committed_ib = growth_policy::grow ( m_committed_ib );
             }
         }
         else {
@@ -329,7 +329,7 @@ struct virtual_vector {
     sys m_sys;
     // Initialed with valid ptr to reserved memory and size = 0 (the number of committed pages).
     pointer m_begin = nullptr, m_end = nullptr;
-    size_type m_committed_in_bytes;
+    size_type m_committed_ib;
 };
 
 void handleEptr ( std::exception_ptr eptr ) { // Passing by value is ok.
@@ -667,7 +667,7 @@ bool operator!= ( vm_allocator<T1> const &, vm_allocator<T2> const & ) noexcept 
 /*
 
     void clear_impl ( ) noexcept {
-        if ( m_committed_size_in_bytes ) {
+        if ( m_committed_size_ib ) {
             // Destroy objects.
             if constexpr ( not std::is_scalar<value_type>::value ) {
                 for ( auto & v : *this )
@@ -676,9 +676,9 @@ bool operator!= ( vm_allocator<T1> const &, vm_allocator<T2> const & ) noexcept 
             // Tear-down committed.
             size_type com  = growth_policy::shrink ( committed ( ) );
             pointer rbegin = m_begin + com;
-            for ( ; sax::win::page_size_in_bytes == com; com = growth_policy::shrink ( com ), rbegin -= com )
+            for ( ; sax::win::page_size_ib == com; com = growth_policy::shrink ( com ), rbegin -= com )
                 sax::win::virtual_alloc ( rbegin, com, MEM_DECOMMIT, PAGE_NOACCESS );
-            sax::win::virtual_alloc ( m_begin, sax::win::page_size_in_bytes, MEM_DECOMMIT, PAGE_NOACCESS );
+            sax::win::virtual_alloc ( m_begin, sax::win::page_size_ib, MEM_DECOMMIT, PAGE_NOACCESS );
         }
     }
 

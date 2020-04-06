@@ -48,7 +48,7 @@ inline SYSTEM_INFO get_system_information ( ) noexcept {
 
 inline SYSTEM_INFO const info = get_system_information ( );
 
-inline constexpr std::size_t page_size_in_bytes = 65'536ull;
+inline constexpr std::size_t page_size_ib = 65'536ull;
 
 std::string last_error ( ) noexcept {
     std::array<char, 16> str{ };
@@ -93,7 +93,7 @@ std::string last_error ( ) noexcept {
         return false;
     }
     if ( HEDLEY_UNLIKELY ( GetLastError ( ) == ERROR_NOT_ALL_ASSIGNED ) ) {
-        throw std::runtime_error (  "The token does not have the specified privilege." );
+        throw std::runtime_error (  "the token does not have the specified privilege" );
         return false;
     }
     return true;
@@ -105,7 +105,6 @@ std::string last_error ( ) noexcept {
 }
 
 [[nodiscard]] inline size_t large_page_minimum ( ) noexcept { return GetLargePageMinimum ( ); }
-[[nodiscard]] inline size_t virtual_page_size ( ) noexcept { return info.dwPageSize; }
 
 [[maybe_unused]] inline LPVOID virtual_alloc ( LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect ) noexcept {
     return VirtualAlloc ( lpAddress, dwSize, flAllocationType, flProtect );
