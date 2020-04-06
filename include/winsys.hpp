@@ -30,9 +30,10 @@
 #include <cstdint>
 #include <cstdlib>
 
-#include <array>
 #include <charconv>
+#include <memory>
 #include <stdexcept>
+#include <string>
 
 #include <hedley.hpp>
 
@@ -51,10 +52,12 @@ inline SYSTEM_INFO const info = get_system_information ( );
 inline constexpr std::size_t page_size_b = 65'536ull;
 
 std::string last_error ( ) noexcept {
-    std::array<char, 16> str{ };
-    if ( auto [ p, ec ] = std::to_chars ( str.data ( ), str.data ( ) + str.size ( ), GetLastError ( ) ); ec == std::errc ( ) )
-        return std::string{ str.data ( ), static_cast<std::size_t> ( p - str.data ( ) ) };
-    return std::string{ };
+    std::string str{ '\0', 15 }; // SSO limit VS.
+    if ( auto [ p, ec ] = std::to_chars ( str.data ( ), str.data ( ) + str.size ( ), GetLastError ( ) ); ec == std::errc ( ) ) {
+        str.resize ( static_cast<std::size_t> ( p - str.data ( ) ) );
+        return str;
+    }
+    return { };
 }
 
 [[nodiscard]] inline void * get_token_handle ( ) {
@@ -70,13 +73,13 @@ std::string last_error ( ) noexcept {
 
 [[maybe_unused]] inline void set_privilege_impl ( void * token,                         // access token handle
                                                   wchar_t const * const privilege_name, // name of privilege to enable/disable
-                                                  bool enable_privilige ) {    // to enable or disable privilege
+                                                  bool enable_privilige ) {             // to enable or disable privilege
     // https://docs.microsoft.com/en-us/windows/win32/secauthz/enabling-and-disabling-privileges-in-c--
     TOKEN_PRIVILEGES tp;
     LUID luid;
-    if ( HEDLEY_UNLIKELY ( not LookupPrivilegeValue ( nullptr,                        // lookup privilege on local system
-                                                      privilege_name,                 // privilege to lookup
-                                                      std::addressof ( luid ) ) ) )  // receives LUID of privilege
+    if ( HEDLEY_UNLIKELY ( not LookupPrivilegeValue ( nullptr,                      // lookup privilege on local system
+                                                      privilege_name,               // privilege to lookup
+                                                      std::addressof ( luid ) ) ) ) // receives LUID of privilege
         throw std::runtime_error ( "LookupPrivilegeValue error: " + last_error ( ) );
     tp.PrivilegeCount       = 1;
     tp.Privileges[ 0 ].Luid = luid;
@@ -89,7 +92,7 @@ std::string last_error ( ) noexcept {
              not AdjustTokenPrivileges ( token, false, std::addressof ( tp ), sizeof ( TOKEN_PRIVILEGES ), nullptr, nullptr ) ) )
         throw std::runtime_error ( "AdjustTokenPrivileges error: " + last_error ( ) );
     if ( HEDLEY_UNLIKELY ( GetLastError ( ) == ERROR_NOT_ALL_ASSIGNED ) )
-        throw std::runtime_error (  "the token does not have the specified privilege" );
+        throw std::runtime_error ( "the token does not have the specified privilege" );
 }
 
 [[maybe_unused]] inline void set_privilege ( wchar_t const * const privilege_name, // name of privilege to enable/disable
