@@ -23,6 +23,11 @@
 
 #pragma once
 
+#include <cassert>
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+
 #include <stdexcept>
 #include <type_traits>
 
@@ -153,7 +158,15 @@ struct virtual_vector {
     }
     [[nodiscard]] reference at ( size_type const i_ ) { return const_cast<reference> ( std::as_const ( *this ).at ( i_ ) ); }
 
-    [[nodiscard]] const_reference operator[] ( size_type const i_ ) const noexcept { return m_begin[ i_ ]; }
+    [[nodiscard]] const_reference operator[] ( size_type const i_ ) const noexcept {
+        if constexpr ( std::is_signed<size_type>::value ) {
+            assert ( 0 <= i_ and i_ < size ( ) );
+        }
+        else {
+            assert ( i_ < size ( ) );
+        }
+        return m_begin[ i_ ];
+    }
     [[nodiscard]] reference operator[] ( size_type const i_ ) noexcept {
         return const_cast<reference> ( std::as_const ( *this ).operator[] ( i_ ) );
     }
