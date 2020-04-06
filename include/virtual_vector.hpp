@@ -23,6 +23,7 @@
 
 #pragma once
 
+#include <stdexcept>
 #include <type_traits>
 
 #include <sax/stl.hpp>
@@ -62,15 +63,15 @@ struct virtual_vector {
     using reverse_iterator       = pointer;
     using const_reverse_iterator = const_pointer;
 
-    virtual_vector ( ) noexcept {
+    virtual_vector ( ) {
         if ( HEDLEY_UNLIKELY ( not win::set_privilege ( SE_LOCK_MEMORY_NAME, true ) ) )
-            std::cout << "Could not set lock page privilege to enabled." << nl;
+            throw std::runtime_error ( "Could not set lock page privilege to enabled." );
         m_end = m_begin =
             reinterpret_cast<pointer> ( win::virtual_alloc ( nullptr, capacity_in_bytes ( ), MEM_RESERVE, PAGE_READWRITE ) );
         m_committed_in_bytes = 0;
     };
 
-    ~virtual_vector ( ) noexcept {
+    ~virtual_vector ( ) noexcept ( false ) {
         if constexpr ( not std::is_scalar<value_type>::value ) {
             for ( auto & v : *this )
                 v.~value_type ( );
@@ -81,7 +82,7 @@ struct virtual_vector {
             m_committed_in_bytes = 0;
         }
         if ( HEDLEY_UNLIKELY ( not win::set_privilege ( SE_LOCK_MEMORY_NAME, false ) ) )
-            std::cout << "Could not set lock page privilege to disabled." << nl;
+            throw std::runtime_error ( "Could not set lock page privilege to disabled." );
     }
 
     // Size.
@@ -114,8 +115,6 @@ struct virtual_vector {
     }
     reference push_back ( const_reference value_ ) noexcept { return emplace_back ( value_type{ value_ } ); }
 
-    // TODO lowering growth factor when vector becomes really large as compared to free memory.
-
     // Data.
 
     [[nodiscard]] const_pointer data ( ) const noexcept { return reinterpret_cast<pointer> ( m_begin ); }
@@ -123,7 +122,7 @@ struct virtual_vector {
 
     // Iterators.
 
-    [[nodiscard]] const_iterator begin ( ) const noexcept { return reinterpret_cast<pointer> ( m_begin ); }
+    [[nodiscard]] const_iterator begin ( ) const noexcept { return m_begin; }
     [[nodiscard]] const_iterator cbegin ( ) const noexcept { return begin ( ); }
     [[nodiscard]] iterator begin ( ) noexcept { return const_cast<iterator> ( std::as_const ( *this ).begin ( ) ); }
 
@@ -135,7 +134,7 @@ struct virtual_vector {
     [[nodiscard]] const_iterator crbegin ( ) const noexcept { return rbegin ( ); }
     [[nodiscard]] iterator rbegin ( ) noexcept { return const_cast<iterator> ( std::as_const ( *this ).rbegin ( ) ); }
 
-    [[nodiscard]] const_iterator rend ( ) const noexcept { return reinterpret_cast<pointer> ( m_begin ) - 1; }
+    [[nodiscard]] const_iterator rend ( ) const noexcept { return m_begin - 1; }
     [[nodiscard]] const_iterator crend ( ) const noexcept { return rend ( ); }
     [[nodiscard]] iterator rend ( ) noexcept { return const_cast<iterator> ( std::as_const ( *this ).rend ( ) ); }
 
@@ -162,4 +161,5 @@ struct virtual_vector {
     pointer m_begin, m_end;
     size_type m_committed_in_bytes;
 };
+
 } // namespace sax
