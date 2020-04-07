@@ -108,8 +108,8 @@ struct virtual_vector {
     template<typename... Args>
     reference emplace_back ( Args &&... value_ ) noexcept {
         if ( HEDLEY_UNLIKELY ( size_b ( ) == m_committed_b ) ) {
-            std::cout << sax::pointer_alignment ( m_end ) << nl;
             size_type cib = std::min ( m_committed_b ? growth_policy::grow ( m_committed_b ) : win::page_size_b, capacity_b ( ) );
+            // std::cout << sax::pointer_alignment ( m_end ) << ' ' << ( cib - m_committed_b ) << nl;
             win::virtual_alloc ( m_end, cib - m_committed_b, MEM_COMMIT, PAGE_READWRITE );
             m_committed_b = cib;
         }

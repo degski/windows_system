@@ -404,7 +404,7 @@ int main ( ) {
 
         */
 
-        constexpr std::size_t sz = 200'000'000;
+        constexpr std::size_t sz = 1'000'000'000;
 
         sax::virtual_vector<int, std::size_t, sz> vv;
 
