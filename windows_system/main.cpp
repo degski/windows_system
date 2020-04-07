@@ -404,7 +404,9 @@ int main ( ) {
 
         */
 
-        sax::virtual_vector<int, size_t, 200'000'000> vv;
+        constexpr std::size_t sz = 200'000'000;
+
+        sax::virtual_vector<int, std::size_t, sz> vv;
 
         /*
         for ( int i = 0; i < 16'384; ++i )
@@ -425,10 +427,10 @@ int main ( ) {
         std::cout << nl;
         */
 
-        for ( int i = 0; i < 200'000'000; ++i )
+        for ( int i = 0; i < sz; ++i )
             vv.emplace_back ( i );
 
-        std::cout << vv[ 200'000'000 - 1 ] << nl;
+        std::cout << vv[ sz - 1 ] << nl;
     }
     catch ( ... ) {
         eptr = std::current_exception ( ); // Capture.
