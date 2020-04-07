@@ -65,7 +65,7 @@ struct virtual_vector {
     using const_reverse_iterator = const_pointer;
 
     virtual_vector ( ) {
-        win::set_privilege ( SE_LOCK_MEMORY_NAME, true );
+        // win::set_privilege ( SE_LOCK_MEMORY_NAME, true );
         m_end = m_begin = reinterpret_cast<pointer> ( win::virtual_alloc ( nullptr, capacity_b ( ), MEM_RESERVE, PAGE_READWRITE ) );
         m_committed_b   = 0;
     };
@@ -80,13 +80,16 @@ struct virtual_vector {
             m_end = m_begin = nullptr;
             m_committed_b   = 0;
         }
-        win::set_privilege ( SE_LOCK_MEMORY_NAME, false );
+        // win::set_privilege ( SE_LOCK_MEMORY_NAME, false );
     }
 
     // Size.
 
     private:
-    [[nodiscard]] constexpr size_type capacity_b ( ) noexcept { return Capacity * sizeof ( value_type ); }
+    [[nodiscard]] constexpr size_type capacity_b ( ) noexcept {
+        std::size_t c = Capacity * sizeof ( value_type );
+        return c % win::page_size_b ? c + win::page_size_b : c;
+    }
     [[nodiscard]] size_type committed_b ( ) const noexcept { return m_committed_b; }
     [[nodiscard]] size_type size_b ( ) const noexcept {
         return reinterpret_cast<char *> ( m_end ) - reinterpret_cast<char *> ( m_begin );
@@ -105,10 +108,11 @@ struct virtual_vector {
     template<typename... Args>
     reference emplace_back ( Args &&... value_ ) noexcept {
         if ( HEDLEY_UNLIKELY ( size_b ( ) == m_committed_b ) ) {
-            size_type cib = m_committed_b ? growth_policy::grow ( m_committed_b ) : win::page_size_b;
+            size_type cib = std::min ( m_committed_b ? growth_policy::grow ( m_committed_b ) : win::page_size_b, capacity_b ( ) );
             win::virtual_alloc ( m_end, cib - m_committed_b, MEM_COMMIT, PAGE_READWRITE );
             m_committed_b = cib;
         }
+        assert ( size ( ) <= capacity ( ) );
         return *new ( m_end++ ) value_type{ std::forward<Args> ( value_ )... };
     }
     reference push_back ( const_reference value_ ) noexcept { return emplace_back ( value_type{ value_ } ); }

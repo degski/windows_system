@@ -404,8 +404,9 @@ int main ( ) {
 
         */
 
-        sax::virtual_vector<int, size_t, 1'000'000> vv;
+        sax::virtual_vector<int, size_t, 8'000'000'000> vv;
 
+        /*
         for ( int i = 0; i < 16'384; ++i )
             vv.emplace_back ( i );
 
@@ -422,6 +423,12 @@ int main ( ) {
         for ( auto & v : vv )
             std::cout << v << ' ';
         std::cout << nl;
+        */
+
+        for ( int i = 0; i < 2'000'000'000; ++i )
+            vv.emplace_back ( i );
+
+        std::cout << vv[ 2'000'000'000 - 1 ] << nl;
     }
     catch ( ... ) {
         eptr = std::current_exception ( ); // Capture.
