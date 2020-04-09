@@ -88,7 +88,7 @@ struct virtual_vector {
     private:
     [[nodiscard]] constexpr size_type capacity_b ( ) noexcept {
         std::size_t c = Capacity * sizeof ( value_type );
-        return c % win::page_size_b ? c + win::page_size_b : c;
+        return c % win::page_size_b ? ( ( c + win::page_size_b ) / win::page_size_b ) * win::page_size_b : c;
     }
     [[nodiscard]] size_type committed_b ( ) const noexcept { return m_committed_b; }
     [[nodiscard]] size_type size_b ( ) const noexcept {
