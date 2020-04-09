@@ -49,6 +49,7 @@
 #include <hedley.hpp>
 
 #include "virtual_vector.hpp"
+#include "winsys.hpp"
 
 // extern unsigned long __declspec( dllimport ) __stdcall GetProcessHeaps ( unsigned long NumberOfHeaps, void ** ProcessHeaps );
 // extern __declspec( dllimport ) void * __stdcall GetProcessHeap ( );

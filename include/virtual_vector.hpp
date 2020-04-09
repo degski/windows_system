@@ -33,16 +33,26 @@
 
 #include <sax/stl.hpp>
 
-#include "winsys.hpp"
-
 namespace sax {
+namespace detail {
+
+inline constexpr std::size_t page_size_b = 16ull * 65'536ull; // 100MB
+
+[[maybe_unused]] inline LPVOID virtual_alloc ( LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect ) noexcept {
+    return VirtualAlloc ( lpAddress, dwSize, flAllocationType, flProtect );
+}
+[[maybe_unused]] inline BOOL virtual_free ( LPVOID lpAddress, SIZE_T dwSize, DWORD dwFreeType ) noexcept {
+    return VirtualFree ( lpAddress, dwSize, dwFreeType );
+}
+} // namespace detail
 
 template<typename SizeType, typename = std::enable_if_t<std::is_unsigned<SizeType>::value>>
 struct growth_policy {
     [[nodiscard]] static SizeType grow ( SizeType const & cap_b_ ) noexcept {
-        // std::cout << ( ( cap_b_ + win::page_size_b ) / win::page_size_b * 100 ) << " MB" << nl;
-        return cap_b_ + win::page_size_b; }
-    [[nodiscard]] static SizeType shrink ( SizeType const & cap_b_ ) noexcept { return cap_b_ - win::page_size_b; }
+        // std::cout << ( ( cap_b_ + detail::page_size_b ) / detail::page_size_b * 100 ) << " MB" << nl;
+        return cap_b_ + detail::page_size_b;
+    }
+    [[nodiscard]] static SizeType shrink ( SizeType const & cap_b_ ) noexcept { return cap_b_ - detail::page_size_b; }
 };
 
 template<typename ValueType, typename SizeType, SizeType Capacity, typename growth_policy = growth_policy<SizeType>>
@@ -67,9 +77,10 @@ struct virtual_vector {
     using const_reverse_iterator = const_pointer;
 
     virtual_vector ( ) {
-        // win::set_privilege ( SE_LOCK_MEMORY_NAME, true );
-        m_end = m_begin = reinterpret_cast<pointer> ( win::virtual_alloc ( nullptr, capacity_b ( ), MEM_RESERVE, PAGE_READWRITE ) );
-        m_committed_b   = 0;
+        // detail::set_privilege ( SE_LOCK_MEMORY_NAME, true );
+        m_end = m_begin =
+            reinterpret_cast<pointer> ( detail::virtual_alloc ( nullptr, capacity_b ( ), MEM_RESERVE, PAGE_READWRITE ) );
+        m_committed_b = 0;
     };
 
     ~virtual_vector ( ) noexcept ( false ) {
@@ -78,11 +89,11 @@ struct virtual_vector {
                 v.~value_type ( );
         }
         if ( HEDLEY_LIKELY ( m_begin ) ) {
-            win::virtual_free ( m_begin, capacity_b ( ), MEM_RELEASE );
+            detail::virtual_free ( m_begin, capacity_b ( ), MEM_RELEASE );
             m_end = m_begin = nullptr;
             m_committed_b   = 0;
         }
-        // win::set_privilege ( SE_LOCK_MEMORY_NAME, false );
+        // detail::set_privilege ( SE_LOCK_MEMORY_NAME, false );
     }
 
     // Size.
@@ -90,7 +101,7 @@ struct virtual_vector {
     private:
     [[nodiscard]] constexpr size_type capacity_b ( ) noexcept {
         std::size_t c = Capacity * sizeof ( value_type );
-        return c % win::page_size_b ? ( ( c + win::page_size_b ) / win::page_size_b ) * win::page_size_b : c;
+        return c % detail::page_size_b ? ( ( c + detail::page_size_b ) / detail::page_size_b ) * detail::page_size_b : c;
     }
     [[nodiscard]] size_type committed_b ( ) const noexcept { return m_committed_b; }
     [[nodiscard]] size_type size_b ( ) const noexcept {
@@ -110,9 +121,10 @@ struct virtual_vector {
     template<typename... Args>
     reference emplace_back ( Args &&... value_ ) noexcept {
         if ( HEDLEY_UNLIKELY ( size_b ( ) == m_committed_b ) ) {
-            size_type cib = std::min ( m_committed_b ? growth_policy::grow ( m_committed_b ) : win::page_size_b, capacity_b ( ) );
+            size_type cib =
+                std::min ( m_committed_b ? growth_policy::grow ( m_committed_b ) : detail::page_size_b, capacity_b ( ) );
             // std::cout << sax::pointer_alignment ( m_end ) << ' ' << ( cib - m_committed_b ) << nl;
-            win::virtual_alloc ( m_end, cib - m_committed_b, MEM_COMMIT, PAGE_READWRITE );
+            detail::virtual_alloc ( m_end, cib - m_committed_b, MEM_COMMIT, PAGE_READWRITE );
             m_committed_b = cib;
         }
         assert ( size ( ) <= capacity ( ) );
