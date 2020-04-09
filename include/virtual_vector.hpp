@@ -39,7 +39,9 @@ namespace sax {
 
 template<typename SizeType, typename = std::enable_if_t<std::is_unsigned<SizeType>::value>>
 struct growth_policy {
-    [[nodiscard]] static SizeType grow ( SizeType const & cap_b_ ) noexcept { return cap_b_ + win::page_size_b; }
+    [[nodiscard]] static SizeType grow ( SizeType const & cap_b_ ) noexcept {
+        // std::cout << ( ( cap_b_ + win::page_size_b ) / win::page_size_b * 100 ) << " MB" << nl;
+        return cap_b_ + win::page_size_b; }
     [[nodiscard]] static SizeType shrink ( SizeType const & cap_b_ ) noexcept { return cap_b_ - win::page_size_b; }
 };
 
