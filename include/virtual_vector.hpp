@@ -35,15 +35,7 @@
 
 namespace sax {
 namespace detail {
-
 inline constexpr std::size_t page_size_b = 16ull * 65'536ull; // 100MB
-
-[[maybe_unused]] inline LPVOID virtual_alloc ( LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect ) noexcept {
-    return VirtualAlloc ( lpAddress, dwSize, flAllocationType, flProtect );
-}
-[[maybe_unused]] inline BOOL virtual_free ( LPVOID lpAddress, SIZE_T dwSize, DWORD dwFreeType ) noexcept {
-    return VirtualFree ( lpAddress, dwSize, dwFreeType );
-}
 } // namespace detail
 
 template<typename SizeType, typename = std::enable_if_t<std::is_unsigned<SizeType>::value>>
@@ -76,12 +68,9 @@ struct virtual_vector {
     using reverse_iterator       = pointer;
     using const_reverse_iterator = const_pointer;
 
-    virtual_vector ( ) {
-        // detail::set_privilege ( SE_LOCK_MEMORY_NAME, true );
-        m_end = m_begin =
-            reinterpret_cast<pointer> ( detail::virtual_alloc ( nullptr, capacity_b ( ), MEM_RESERVE, PAGE_READWRITE ) );
-        m_committed_b = 0;
-    };
+    virtual_vector ( ) :
+        m_begin{ reinterpret_cast<pointer> ( VirtualAlloc ( nullptr, capacity_b ( ), MEM_RESERVE, PAGE_READWRITE ) ) },
+        m_end{ m_begin }, m_committed_b{ 0 } { };
 
     ~virtual_vector ( ) noexcept ( false ) {
         if constexpr ( not std::is_trivial<value_type>::value ) {
@@ -89,11 +78,10 @@ struct virtual_vector {
                 v.~value_type ( );
         }
         if ( HEDLEY_LIKELY ( m_begin ) ) {
-            detail::virtual_free ( m_begin, capacity_b ( ), MEM_RELEASE );
+            VirtualFree ( m_begin, capacity_b ( ), MEM_RELEASE );
             m_end = m_begin = nullptr;
             m_committed_b   = 0;
         }
-        // detail::set_privilege ( SE_LOCK_MEMORY_NAME, false );
     }
 
     // Size.
@@ -103,14 +91,12 @@ struct virtual_vector {
         std::size_t c = Capacity * sizeof ( value_type );
         return c % detail::page_size_b ? ( ( c + detail::page_size_b ) / detail::page_size_b ) * detail::page_size_b : c;
     }
-    [[nodiscard]] size_type committed_b ( ) const noexcept { return m_committed_b; }
     [[nodiscard]] size_type size_b ( ) const noexcept {
         return reinterpret_cast<char *> ( m_end ) - reinterpret_cast<char *> ( m_begin );
     }
 
     public:
     [[nodiscard]] constexpr size_type capacity ( ) noexcept { return Capacity; }
-    [[nodiscard]] size_type committed ( ) const noexcept { return m_committed_b / sizeof ( value_type ); }
     [[nodiscard]] size_type size ( ) const noexcept {
         return reinterpret_cast<value_type *> ( m_end ) - reinterpret_cast<value_type *> ( m_begin );
     }
@@ -124,7 +110,7 @@ struct virtual_vector {
             size_type cib =
                 std::min ( m_committed_b ? growth_policy::grow ( m_committed_b ) : detail::page_size_b, capacity_b ( ) );
             // std::cout << sax::pointer_alignment ( m_end ) << ' ' << ( cib - m_committed_b ) << nl;
-            detail::virtual_alloc ( m_end, cib - m_committed_b, MEM_COMMIT, PAGE_READWRITE );
+            VirtualAlloc ( m_end, cib - m_committed_b, MEM_COMMIT, PAGE_READWRITE );
             m_committed_b = cib;
         }
         assert ( size ( ) <= capacity ( ) );
