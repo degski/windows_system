@@ -34,6 +34,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <new>
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
@@ -45,10 +46,7 @@ inline constexpr std::size_t page_size_b = 16ull * 65'536ull; // 100MB
 
 template<typename SizeType, typename = std::enable_if_t<std::is_unsigned<SizeType>::value>>
 struct growth_policy {
-    [[nodiscard]] static SizeType grow ( SizeType const & cap_b_ ) noexcept {
-        // std::cout << ( ( cap_b_ + detail::page_size_b ) / detail::page_size_b * 100 ) << " MB" << nl;
-        return cap_b_ + detail::page_size_b;
-    }
+    [[nodiscard]] static SizeType grow ( SizeType const & cap_b_ ) noexcept { return cap_b_ + detail::page_size_b; }
     [[nodiscard]] static SizeType shrink ( SizeType const & cap_b_ ) noexcept { return cap_b_ - detail::page_size_b; }
 };
 
@@ -74,7 +72,10 @@ struct virtual_vector {
 
     virtual_vector ( ) :
         m_begin{ reinterpret_cast<pointer> ( VirtualAlloc ( nullptr, capacity_b ( ), MEM_RESERVE, PAGE_READWRITE ) ) },
-        m_end{ m_begin }, m_committed_b{ 0u } { };
+        m_end{ m_begin }, m_committed_b{ 0u } {
+        if ( not m_begin )
+            throw std::bad_alloc ( );
+    };
 
     ~virtual_vector ( ) {
         if constexpr ( not std::is_trivial<value_type>::value ) {
@@ -99,7 +100,6 @@ struct virtual_vector {
         if ( HEDLEY_UNLIKELY ( size_b ( ) == m_committed_b ) ) {
             size_type cib =
                 std::min ( m_committed_b ? growth_policy::grow ( m_committed_b ) : detail::page_size_b, capacity_b ( ) );
-            // std::cout << sax::pointer_alignment ( m_end ) << ' ' << ( cib - m_committed_b ) << nl;
             VirtualAlloc ( m_end, cib - m_committed_b, MEM_COMMIT, PAGE_READWRITE );
             m_committed_b = cib;
         }
