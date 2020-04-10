@@ -88,7 +88,7 @@ struct virtual_vector {
         }
     }
 
-    [[nodiscard]] constexpr size_type capacity ( ) noexcept { return Capacity; }
+    [[nodiscard]] constexpr size_type capacity ( ) const noexcept { return Capacity; }
     [[nodiscard]] size_type size ( ) const noexcept {
         return reinterpret_cast<value_type *> ( m_end ) - reinterpret_cast<value_type *> ( m_begin );
     }
