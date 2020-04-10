@@ -39,10 +39,6 @@
 
 namespace sax {
 
-namespace detail {
-inline constexpr std::size_t page_size_b = 16ull * 65'536ull; // 100MB
-} // namespace detail
-
 template<typename ValueType, typename SizeType, SizeType Capacity>
 struct vm_array {
 
@@ -145,13 +141,18 @@ struct vm_array {
 
     private:
     [[nodiscard]] constexpr size_type capacity_b ( ) const noexcept {
-        std::size_t c = Capacity * sizeof ( value_type );
-        return c % detail::page_size_b ? ( ( c + detail::page_size_b ) / detail::page_size_b ) * detail::page_size_b : c;
+        constexpr std::size_t psb = 65'536ull;
+        std::size_t c             = Capacity * sizeof ( value_type );
+        return c % psb ? ( ( c + psb ) / psb ) * psb : c;
     }
     [[nodiscard]] constexpr size_type size_b ( ) const noexcept { return capacity_b ( ); }
 
     pointer m_begin, m_end;
 };
+
+namespace detail {
+inline constexpr std::size_t page_size_b = 16ull * 65'536ull; // 100MB
+} // namespace detail
 
 template<typename SizeType, typename = std::enable_if_t<std::is_unsigned<SizeType>::value>>
 struct growth_policy {
