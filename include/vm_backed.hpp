@@ -150,8 +150,8 @@ struct vm_array {
 
     private:
     [[nodiscard]] constexpr size_type capacity_b ( ) const noexcept {
-        constexpr std::size_t psb = 65'536ull, cap = Capacity * sizeof ( value_type );
-        return cap % psb ? ( ( cap + psb ) / psb ) * psb : cap;
+        constexpr std::size_t psb = 65'536ull, req = Capacity * sizeof ( value_type );
+        return req % psb ? ( ( req + psb ) / psb ) * psb : req;
     }
     [[nodiscard]] constexpr size_type size_b ( ) const noexcept { return capacity_b ( ); }
 
@@ -201,6 +201,10 @@ struct vm_vector {
     }
 
     explicit vm_vector ( size_type const s_, value_type const & v_ ) : vm_vector{ } {
+        size_type rc = required_b ( s_ );
+        if ( HEDLEY_UNLIKELY ( not VirtualAlloc ( m_end, rc, MEM_COMMIT, PAGE_READWRITE ) ) )
+            throw std::bad_alloc ( );
+        m_committed_b = rc;
         for ( pointer e = m_begin + std::min ( s_, capacity ( ) ); m_end < e; ++m_end )
             new ( m_end ) value_type{ v_ };
     }
@@ -299,6 +303,10 @@ struct vm_vector {
     }
 
     private:
+    [[nodiscard]] size_type required_b ( size_type const & r_ ) const noexcept {
+        std::size_t req = r_ * sizeof ( value_type );
+        return req % detail::page_size_b ? ( ( req + detail::page_size_b ) / detail::page_size_b ) * detail::page_size_b : req;
+    }
     [[nodiscard]] constexpr size_type capacity_b ( ) const noexcept {
         constexpr std::size_t cap = Capacity * sizeof ( value_type );
         return cap % detail::page_size_b ? ( ( cap + detail::page_size_b ) / detail::page_size_b ) * detail::page_size_b : cap;
