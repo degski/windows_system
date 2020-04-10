@@ -73,7 +73,7 @@ struct virtual_vector {
     virtual_vector ( ) :
         m_begin{ reinterpret_cast<pointer> ( VirtualAlloc ( nullptr, capacity_b ( ), MEM_RESERVE, PAGE_READWRITE ) ) },
         m_end{ m_begin }, m_committed_b{ 0u } {
-        if ( not m_begin )
+        if ( HEDLEY_UNLIKELY ( not m_begin ) )
             throw std::bad_alloc ( );
     };
 
@@ -96,17 +96,17 @@ struct virtual_vector {
     [[nodiscard]] constexpr size_type max_size ( ) const noexcept { return capacity ( ); }
 
     template<typename... Args>
-    [[maybe_unused]] reference emplace_back ( Args &&... value_ ) noexcept {
+    [[maybe_unused]] reference emplace_back ( Args &&... value_ ) {
         if ( HEDLEY_UNLIKELY ( size_b ( ) == m_committed_b ) ) {
             size_type cib =
                 std::min ( m_committed_b ? growth_policy::grow ( m_committed_b ) : detail::page_size_b, capacity_b ( ) );
-            VirtualAlloc ( m_end, cib - m_committed_b, MEM_COMMIT, PAGE_READWRITE );
+            if ( HEDLEY_UNLIKELY ( not VirtualAlloc ( m_end, cib - m_committed_b, MEM_COMMIT, PAGE_READWRITE ) ) )
+                throw std::bad_alloc ( );
             m_committed_b = cib;
         }
-        assert ( size ( ) <= capacity ( ) );
         return *new ( m_end++ ) value_type{ std::forward<Args> ( value_ )... };
     }
-    [[maybe_unused]] reference push_back ( const_reference value_ ) noexcept { return emplace_back ( value_type{ value_ } ); }
+    [[maybe_unused]] reference push_back ( const_reference value_ ) { return emplace_back ( value_type{ value_ } ); }
 
     [[nodiscard]] const_pointer data ( ) const noexcept { return reinterpret_cast<pointer> ( m_begin ); }
     [[nodiscard]] pointer data ( ) noexcept { return const_cast<pointer> ( std::as_const ( *this ).data ( ) ); }
