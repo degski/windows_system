@@ -74,7 +74,7 @@ struct virtual_vector {
 
     virtual_vector ( ) :
         m_begin{ reinterpret_cast<pointer> ( VirtualAlloc ( nullptr, capacity_b ( ), MEM_RESERVE, PAGE_READWRITE ) ) },
-        m_end{ m_begin }, m_committed_b{ 0 } { };
+        m_end{ m_begin }, m_committed_b{ 0u } { };
 
     ~virtual_vector ( ) {
         if constexpr ( not std::is_trivial<value_type>::value ) {
@@ -84,7 +84,7 @@ struct virtual_vector {
         if ( HEDLEY_LIKELY ( m_begin ) ) {
             VirtualFree ( m_begin, capacity_b ( ), MEM_RELEASE );
             m_end = m_begin = nullptr;
-            m_committed_b   = 0;
+            m_committed_b   = 0u;
         }
     }
 
@@ -108,12 +108,8 @@ struct virtual_vector {
     }
     [[maybe_unused]] reference push_back ( const_reference value_ ) noexcept { return emplace_back ( value_type{ value_ } ); }
 
-    // Data.
-
     [[nodiscard]] const_pointer data ( ) const noexcept { return reinterpret_cast<pointer> ( m_begin ); }
     [[nodiscard]] pointer data ( ) noexcept { return const_cast<pointer> ( std::as_const ( *this ).data ( ) ); }
-
-    // Iterators.
 
     [[nodiscard]] const_iterator begin ( ) const noexcept { return m_begin; }
     [[nodiscard]] const_iterator cbegin ( ) const noexcept { return begin ( ); }
@@ -167,7 +163,7 @@ struct virtual_vector {
     }
 
     private:
-    [[nodiscard]] constexpr size_type capacity_b ( ) noexcept {
+    [[nodiscard]] constexpr size_type capacity_b ( ) const noexcept {
         std::size_t c = Capacity * sizeof ( value_type );
         return c % detail::page_size_b ? ( ( c + detail::page_size_b ) / detail::page_size_b ) * detail::page_size_b : c;
     }
