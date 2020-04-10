@@ -72,7 +72,7 @@ struct virtual_vector {
         m_begin{ reinterpret_cast<pointer> ( VirtualAlloc ( nullptr, capacity_b ( ), MEM_RESERVE, PAGE_READWRITE ) ) },
         m_end{ m_begin }, m_committed_b{ 0 } { };
 
-    ~virtual_vector ( ) noexcept ( false ) {
+    ~virtual_vector ( ) {
         if constexpr ( not std::is_trivial<value_type>::value ) {
             for ( auto & v : *this )
                 v.~value_type ( );
