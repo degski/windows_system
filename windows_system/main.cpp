@@ -48,7 +48,7 @@
 
 #include <hedley.hpp>
 
-#include "virtual_vector.hpp"
+#include "vm_backed.hpp"
 #include "winsys.hpp"
 
 // extern unsigned long __declspec( dllimport ) __stdcall GetProcessHeaps ( unsigned long NumberOfHeaps, void ** ProcessHeaps );
@@ -407,7 +407,7 @@ int main ( ) {
 
         constexpr std::size_t sz = 1'000'000'000;
 
-        sax::virtual_vector<int, std::size_t, sz> vv;
+        sax::vm_vector<int, std::size_t, sz> vv;
 
         /*
         for ( int i = 0; i < 16'384; ++i )

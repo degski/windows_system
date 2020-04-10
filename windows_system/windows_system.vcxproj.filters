@@ -23,7 +23,7 @@
     <ClInclude Include="..\include\winsys.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\include\virtual_vector.hpp">
+    <ClInclude Include="..\include\vm_backed.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
