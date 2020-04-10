@@ -31,11 +31,14 @@
 #include <cstdlib>
 
 #include <algorithm>
+#include <initializer_list>
 #include <memory>
 #include <new>
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
+
+#include <hedley.hpp>
 
 namespace sax {
 
@@ -69,6 +72,12 @@ struct vm_array {
                 new ( std::addressof ( v ) ) value_type{ };
         }
     };
+
+    vm_array ( std::initializer_list<value_type> il_ ) : vm_array{ } {
+        pointer p = m_begin;
+        for ( auto & v : il_ )
+            new ( p++ ) value_type{ v };
+    }
 
     ~vm_array ( ) {
         if constexpr ( not std::is_trivial<value_type>::value ) {
@@ -186,6 +195,16 @@ struct vm_vector {
             throw std::bad_alloc ( );
     };
 
+    vm_vector ( std::initializer_list<value_type> il_ ) : vm_vector{ } {
+        for ( auto & v : il_ )
+            push_back ( v );
+    }
+
+    explicit vm_vector ( size_type const s_, value_type const & v_ ) : vm_vector{ } {
+        for ( pointer e = m_begin + std::min ( s_, capacity ( ) ); m_end < e; ++m_end )
+            new ( m_end ) value_type{ v_ };
+    }
+
     ~vm_vector ( ) {
         if constexpr ( not std::is_trivial<value_type>::value ) {
             for ( auto & v : *this )
@@ -216,6 +235,14 @@ struct vm_vector {
         return *new ( m_end++ ) value_type{ std::forward<Args> ( value_ )... };
     }
     [[maybe_unused]] reference push_back ( const_reference value_ ) { return emplace_back ( value_type{ value_ } ); }
+
+    void pop_back ( ) noexcept {
+        assert ( size ( ) );
+        if constexpr ( not std::is_trivial<value_type>::value ) {
+            back ( ).~value_type ( );
+        }
+        --m_end;
+    }
 
     [[nodiscard]] const_pointer data ( ) const noexcept { return reinterpret_cast<pointer> ( m_begin ); }
     [[nodiscard]] pointer data ( ) noexcept { return const_cast<pointer> ( std::as_const ( *this ).data ( ) ); }
