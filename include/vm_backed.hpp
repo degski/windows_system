@@ -141,9 +141,8 @@ struct vm_array {
 
     private:
     [[nodiscard]] constexpr size_type capacity_b ( ) const noexcept {
-        constexpr std::size_t psb = 65'536ull;
-        std::size_t c             = Capacity * sizeof ( value_type );
-        return c % psb ? ( ( c + psb ) / psb ) * psb : c;
+        constexpr std::size_t psb = 65'536ull, cap = Capacity * sizeof ( value_type );
+        return cap % psb ? ( ( cap + psb ) / psb ) * psb : cap;
     }
     [[nodiscard]] constexpr size_type size_b ( ) const noexcept { return capacity_b ( ); }
 
@@ -274,8 +273,8 @@ struct vm_vector {
 
     private:
     [[nodiscard]] constexpr size_type capacity_b ( ) const noexcept {
-        std::size_t c = Capacity * sizeof ( value_type );
-        return c % detail::page_size_b ? ( ( c + detail::page_size_b ) / detail::page_size_b ) * detail::page_size_b : c;
+        constexpr std::size_t cap = Capacity * sizeof ( value_type );
+        return cap % detail::page_size_b ? ( ( cap + detail::page_size_b ) / detail::page_size_b ) * detail::page_size_b : cap;
     }
     [[nodiscard]] size_type size_b ( ) const noexcept {
         return reinterpret_cast<char *> ( m_end ) - reinterpret_cast<char *> ( m_begin );
