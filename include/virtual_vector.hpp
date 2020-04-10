@@ -110,7 +110,7 @@ struct virtual_vector {
     // Add.
 
     template<typename... Args>
-    reference emplace_back ( Args &&... value_ ) noexcept {
+    [[maybe_unused]] reference emplace_back ( Args &&... value_ ) noexcept {
         if ( HEDLEY_UNLIKELY ( size_b ( ) == m_committed_b ) ) {
             size_type cib =
                 std::min ( m_committed_b ? growth_policy::grow ( m_committed_b ) : detail::page_size_b, capacity_b ( ) );
@@ -121,7 +121,7 @@ struct virtual_vector {
         assert ( size ( ) <= capacity ( ) );
         return *new ( m_end++ ) value_type{ std::forward<Args> ( value_ )... };
     }
-    reference push_back ( const_reference value_ ) noexcept { return emplace_back ( value_type{ value_ } ); }
+    [[maybe_unused]] reference push_back ( const_reference value_ ) noexcept { return emplace_back ( value_type{ value_ } ); }
 
     // Data.
 
