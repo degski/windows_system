@@ -75,13 +75,13 @@ struct vm_array {
 
     vm_array ( std::initializer_list<value_type> il_ ) : vm_array{ } {
         pointer p = m_begin;
-        for ( auto & v : il_ )
+        for ( value_type const & v : il_ )
             new ( p++ ) value_type{ v };
     }
 
     ~vm_array ( ) {
         if constexpr ( not std::is_trivial<value_type>::value ) {
-            for ( auto & v : *this )
+            for ( value_type & v : *this )
                 v.~value_type ( );
         }
         if ( HEDLEY_LIKELY ( m_begin ) ) {
@@ -196,7 +196,7 @@ struct vm_vector {
     };
 
     vm_vector ( std::initializer_list<value_type> il_ ) : vm_vector{ } {
-        for ( auto & v : il_ )
+        for ( value_type const & v : il_ )
             push_back ( v );
     }
 
