@@ -38,8 +38,6 @@
 #include <type_traits>
 #include <utility>
 
-#include <sax/stl.hpp>
-
 namespace sax {
 namespace detail {
 inline constexpr std::size_t page_size_b = 16ull * 65'536ull; // 100MB
