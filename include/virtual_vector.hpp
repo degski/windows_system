@@ -175,4 +175,114 @@ struct virtual_vector {
     size_type m_committed_b;
 };
 
+template<typename ValueType, typename SizeType, SizeType Capacity>
+struct virtual_array {
+
+    using value_type = ValueType;
+
+    using pointer       = value_type *;
+    using const_pointer = value_type const *;
+
+    using reference       = value_type &;
+    using const_reference = value_type const &;
+    using rv_reference    = value_type &&;
+
+    using size_type       = SizeType;
+    using difference_type = std::make_signed<size_type>;
+
+    using iterator               = pointer;
+    using const_iterator         = const_pointer;
+    using reverse_iterator       = pointer;
+    using const_reverse_iterator = const_pointer;
+
+    virtual_array ( ) :
+        m_begin{ reinterpret_cast<pointer> ( VirtualAlloc ( nullptr, capacity_b ( ), MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE ) ) },
+        m_end{ m_begin + capacity_b ( ) } {
+        if ( HEDLEY_UNLIKELY ( not m_begin ) )
+            throw std::bad_alloc ( );
+        if constexpr ( not std::is_trivial<value_type>::value ) {
+            for ( auto & v : *this )
+                new ( std::addressof ( v ) ) value_type{ };
+        }
+    };
+
+    ~virtual_array ( ) {
+        if constexpr ( not std::is_trivial<value_type>::value ) {
+            for ( auto & v : *this )
+                v.~value_type ( );
+        }
+        if ( HEDLEY_LIKELY ( m_begin ) ) {
+            VirtualFree ( m_begin, capacity_b ( ), MEM_RELEASE );
+            m_end = m_begin = nullptr;
+        }
+    }
+
+    [[nodiscard]] constexpr size_type capacity ( ) const noexcept { return Capacity; }
+    [[nodiscard]] constexpr size_type size ( ) const noexcept { return capacity ( ); }
+    [[nodiscard]] constexpr size_type max_size ( ) const noexcept { return capacity ( ); }
+
+    [[nodiscard]] const_pointer data ( ) const noexcept { return reinterpret_cast<pointer> ( m_begin ); }
+    [[nodiscard]] pointer data ( ) noexcept { return const_cast<pointer> ( std::as_const ( *this ).data ( ) ); }
+
+    [[nodiscard]] const_iterator begin ( ) const noexcept { return m_begin; }
+    [[nodiscard]] const_iterator cbegin ( ) const noexcept { return begin ( ); }
+    [[nodiscard]] iterator begin ( ) noexcept { return const_cast<iterator> ( std::as_const ( *this ).begin ( ) ); }
+
+    [[nodiscard]] const_iterator end ( ) const noexcept { return m_end; }
+    [[nodiscard]] const_iterator cend ( ) const noexcept { return end ( ); }
+    [[nodiscard]] iterator end ( ) noexcept { return const_cast<iterator> ( std::as_const ( *this ).end ( ) ); }
+
+    [[nodiscard]] const_iterator rbegin ( ) const noexcept { return m_end - 1; }
+    [[nodiscard]] const_iterator crbegin ( ) const noexcept { return rbegin ( ); }
+    [[nodiscard]] iterator rbegin ( ) noexcept { return const_cast<iterator> ( std::as_const ( *this ).rbegin ( ) ); }
+
+    [[nodiscard]] const_iterator rend ( ) const noexcept { return m_begin - 1; }
+    [[nodiscard]] const_iterator crend ( ) const noexcept { return rend ( ); }
+    [[nodiscard]] iterator rend ( ) noexcept { return const_cast<iterator> ( std::as_const ( *this ).rend ( ) ); }
+
+    [[nodiscard]] const_reference front ( ) const noexcept { return *begin ( ); }
+    [[nodiscard]] reference front ( ) noexcept { return const_cast<reference> ( std::as_const ( *this ).front ( ) ); }
+
+    [[nodiscard]] const_reference back ( ) const noexcept { return *rbegin ( ); }
+    [[nodiscard]] reference back ( ) noexcept { return const_cast<reference> ( std::as_const ( *this ).back ( ) ); }
+
+    [[nodiscard]] const_reference at ( size_type const i_ ) const {
+        if constexpr ( std::is_signed<size_type>::value ) {
+            if ( HEDLEY_LIKELY ( 0 <= i_ and i_ < size ( ) ) )
+                return m_begin[ i_ ];
+            else
+                throw std::runtime_error ( "index out of bounds" );
+        }
+        else {
+            if ( HEDLEY_LIKELY ( i_ < size ( ) ) )
+                return m_begin[ i_ ];
+            else
+                throw std::runtime_error ( "index out of bounds" );
+        }
+    }
+    [[nodiscard]] reference at ( size_type const i_ ) { return const_cast<reference> ( std::as_const ( *this ).at ( i_ ) ); }
+
+    [[nodiscard]] const_reference operator[] ( size_type const i_ ) const noexcept {
+        if constexpr ( std::is_signed<size_type>::value ) {
+            assert ( 0 <= i_ and i_ < size ( ) );
+        }
+        else {
+            assert ( i_ < size ( ) );
+        }
+        return m_begin[ i_ ];
+    }
+    [[nodiscard]] reference operator[] ( size_type const i_ ) noexcept {
+        return const_cast<reference> ( std::as_const ( *this ).operator[] ( i_ ) );
+    }
+
+    private:
+    [[nodiscard]] constexpr size_type capacity_b ( ) const noexcept {
+        std::size_t c = Capacity * sizeof ( value_type );
+        return c % detail::page_size_b ? ( ( c + detail::page_size_b ) / detail::page_size_b ) * detail::page_size_b : c;
+    }
+    [[nodiscard]] constexpr size_type size_b ( ) const noexcept { return capacity_b ( ); }
+
+    pointer m_begin, m_end;
+};
+
 } // namespace sax
