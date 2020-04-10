@@ -23,13 +23,20 @@
 
 #pragma once
 
+#include <processthreadsapi.h>
+
+#pragma comment( lib, "Advapi32.lib" )
+
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 
+#include <algorithm>
+#include <memory>
 #include <stdexcept>
 #include <type_traits>
+#include <utility>
 
 #include <sax/stl.hpp>
 
