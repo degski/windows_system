@@ -23,6 +23,7 @@
 
 #pragma once
 
+#include <Memoryapi.h>
 #include <processthreadsapi.h>
 
 #include <cassert>

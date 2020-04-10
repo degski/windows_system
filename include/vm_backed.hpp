@@ -23,9 +23,7 @@
 
 #pragma once
 
-#include <processthreadsapi.h>
-
-#pragma comment( lib, "Advapi32.lib" )
+#include <Memoryapi.h>
 
 #include <cassert>
 #include <cstddef>
