@@ -55,7 +55,6 @@ struct growth_policy {
 template<typename ValueType, typename SizeType, SizeType Capacity, typename growth_policy = growth_policy<SizeType>>
 struct virtual_vector {
 
-    public:
     using value_type = ValueType;
 
     using pointer       = value_type *;
@@ -89,25 +88,11 @@ struct virtual_vector {
         }
     }
 
-    // Size.
-
-    private:
-    [[nodiscard]] constexpr size_type capacity_b ( ) noexcept {
-        std::size_t c = Capacity * sizeof ( value_type );
-        return c % detail::page_size_b ? ( ( c + detail::page_size_b ) / detail::page_size_b ) * detail::page_size_b : c;
-    }
-    [[nodiscard]] size_type size_b ( ) const noexcept {
-        return reinterpret_cast<char *> ( m_end ) - reinterpret_cast<char *> ( m_begin );
-    }
-
-    public:
     [[nodiscard]] constexpr size_type capacity ( ) noexcept { return Capacity; }
     [[nodiscard]] size_type size ( ) const noexcept {
         return reinterpret_cast<value_type *> ( m_end ) - reinterpret_cast<value_type *> ( m_begin );
     }
     [[nodiscard]] constexpr size_type max_size ( ) noexcept { return capacity ( ); }
-
-    // Add.
 
     template<typename... Args>
     [[maybe_unused]] reference emplace_back ( Args &&... value_ ) noexcept {
@@ -182,6 +167,14 @@ struct virtual_vector {
     }
 
     private:
+    [[nodiscard]] constexpr size_type capacity_b ( ) noexcept {
+        std::size_t c = Capacity * sizeof ( value_type );
+        return c % detail::page_size_b ? ( ( c + detail::page_size_b ) / detail::page_size_b ) * detail::page_size_b : c;
+    }
+    [[nodiscard]] size_type size_b ( ) const noexcept {
+        return reinterpret_cast<char *> ( m_end ) - reinterpret_cast<char *> ( m_begin );
+    }
+
     pointer m_begin, m_end;
     size_type m_committed_b;
 };
