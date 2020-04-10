@@ -92,7 +92,7 @@ struct virtual_vector {
     [[nodiscard]] size_type size ( ) const noexcept {
         return reinterpret_cast<value_type *> ( m_end ) - reinterpret_cast<value_type *> ( m_begin );
     }
-    [[nodiscard]] constexpr size_type max_size ( ) noexcept { return capacity ( ); }
+    [[nodiscard]] constexpr size_type max_size ( ) const noexcept { return capacity ( ); }
 
     template<typename... Args>
     [[maybe_unused]] reference emplace_back ( Args &&... value_ ) noexcept {
