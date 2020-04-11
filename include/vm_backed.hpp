@@ -153,7 +153,7 @@ struct vm_array {
     }
 
     private:
-    static constexpr size_type page_size_b = static_cast<size_type> ( 65'536ull ); // 64KB
+    static constexpr size_type page_size_b = static_cast<size_type> ( 65'536 ); // 64KB
 
     [[nodiscard]] constexpr size_type capacity_b ( ) const noexcept {
         constexpr size_type req = static_cast<size_type> ( Capacity * sizeof ( value_type ) );
@@ -298,8 +298,8 @@ struct vm_vector {
     }
 
     private:
-    static constexpr size_type page_size_b            = static_cast<size_type> ( 65'536 );              // 64KB
-    static constexpr size_type allocation_page_size_b = static_cast<size_type> ( 1'600 * page_size_b ); // 100MB
+    static constexpr size_type page_size_b            = static_cast<size_type> ( 65'536 );         // 64KB
+    static constexpr size_type allocation_page_size_b = static_cast<size_type> ( 1'600 * 65'536 ); // 100MB
 
     [[nodiscard]] size_type required_b ( size_type const & r_ ) const noexcept {
         std::size_t req = r_ * sizeof ( value_type );
