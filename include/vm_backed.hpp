@@ -226,8 +226,7 @@ struct vm_vector {
     template<typename... Args>
     [[maybe_unused]] reference emplace_back ( Args &&... value_ ) {
         if ( HEDLEY_UNLIKELY ( size_b ( ) == m_committed_b ) ) {
-            size_type cib =
-                std::min ( m_committed_b ? grow ( m_committed_b ) : static_cast<size_type> ( page_size_b ), capacity_b ( ) );
+            size_type cib = std::min ( m_committed_b ? grow ( m_committed_b ) : allocation_page_size_b, capacity_b ( ) );
             if ( HEDLEY_UNLIKELY ( not VirtualAlloc ( m_end, cib - m_committed_b, MEM_COMMIT, PAGE_READWRITE ) ) )
                 throw std::bad_alloc ( );
             m_committed_b = cib;
@@ -299,7 +298,8 @@ struct vm_vector {
     }
 
     private:
-    static constexpr size_type page_size_b = static_cast<size_type> ( 16ull * 65'536ull ); // 100MB
+    static constexpr size_type page_size_b            = static_cast<size_type> ( 65'536ull );         // 64KB
+    static constexpr size_type allocation_page_size_b = static_cast<size_type> ( 16ull * 65'536ull ); // 100MB
 
     [[nodiscard]] size_type required_b ( size_type const & r_ ) const noexcept {
         std::size_t req = r_ * sizeof ( value_type );
@@ -313,8 +313,8 @@ struct vm_vector {
         return reinterpret_cast<char *> ( m_end ) - reinterpret_cast<char *> ( m_begin );
     }
 
-    [[nodiscard]] static size_type grow ( size_type const & cap_b_ ) noexcept { return cap_b_ + page_size_b; }
-    [[nodiscard]] static size_type shrink ( size_type const & cap_b_ ) noexcept { return cap_b_ - page_size_b; }
+    [[nodiscard]] static size_type grow ( size_type const & cap_b_ ) noexcept { return cap_b_ + allocation_page_size_b; }
+    [[nodiscard]] static size_type shrink ( size_type const & cap_b_ ) noexcept { return cap_b_ - allocation_page_size_b; }
 
     pointer m_begin, m_end;
     size_type m_committed_b;
