@@ -23,6 +23,10 @@
 
 #pragma once
 
+#ifndef NOMINMAX
+#    define NOMINMAX
+#endif
+
 #include <Memoryapi.h>
 
 #include <cassert>
@@ -149,26 +153,18 @@ struct vm_array {
     }
 
     private:
+    static constexpr size_type page_size_b = static_cast<size_type> ( 65'536ull ); // 64KB
+
     [[nodiscard]] constexpr size_type capacity_b ( ) const noexcept {
-        constexpr std::size_t psb = 65'536ull, req = Capacity * sizeof ( value_type );
-        return req % psb ? ( ( req + psb ) / psb ) * psb : req;
+        constexpr size_type req = static_cast<size_type> ( Capacity * sizeof ( value_type ) );
+        return req % page_size_b ? ( ( req + page_size_b ) / page_size_b ) * page_size_b : req;
     }
     [[nodiscard]] constexpr size_type size_b ( ) const noexcept { return capacity_b ( ); }
 
     pointer m_begin, m_end;
 };
 
-namespace detail {
-inline constexpr std::size_t page_size_b = 16ull * 65'536ull; // 100MB
-} // namespace detail
-
-template<typename SizeType, typename = std::enable_if_t<std::is_unsigned<SizeType>::value>>
-struct growth_policy {
-    [[nodiscard]] static SizeType grow ( SizeType const & cap_b_ ) noexcept { return cap_b_ + detail::page_size_b; }
-    [[nodiscard]] static SizeType shrink ( SizeType const & cap_b_ ) noexcept { return cap_b_ - detail::page_size_b; }
-};
-
-template<typename ValueType, typename SizeType, SizeType Capacity, typename growth_policy = growth_policy<SizeType>>
+template<typename ValueType, typename SizeType, SizeType Capacity>
 struct vm_vector {
 
     using value_type = ValueType;
@@ -211,7 +207,7 @@ struct vm_vector {
 
     ~vm_vector ( ) {
         if constexpr ( not std::is_trivial<value_type>::value ) {
-            for ( auto & v : *this )
+            for ( value_type & v : *this )
                 v.~value_type ( );
         }
         if ( HEDLEY_LIKELY ( m_begin ) ) {
@@ -231,7 +227,7 @@ struct vm_vector {
     [[maybe_unused]] reference emplace_back ( Args &&... value_ ) {
         if ( HEDLEY_UNLIKELY ( size_b ( ) == m_committed_b ) ) {
             size_type cib =
-                std::min ( m_committed_b ? growth_policy::grow ( m_committed_b ) : detail::page_size_b, capacity_b ( ) );
+                std::min ( m_committed_b ? grow ( m_committed_b ) : static_cast<size_type> ( page_size_b ), capacity_b ( ) );
             if ( HEDLEY_UNLIKELY ( not VirtualAlloc ( m_end, cib - m_committed_b, MEM_COMMIT, PAGE_READWRITE ) ) )
                 throw std::bad_alloc ( );
             m_committed_b = cib;
@@ -303,17 +299,22 @@ struct vm_vector {
     }
 
     private:
+    static constexpr size_type page_size_b = static_cast<size_type> ( 16ull * 65'536ull ); // 100MB
+
     [[nodiscard]] size_type required_b ( size_type const & r_ ) const noexcept {
         std::size_t req = r_ * sizeof ( value_type );
-        return req % detail::page_size_b ? ( ( req + detail::page_size_b ) / detail::page_size_b ) * detail::page_size_b : req;
+        return req % page_size_b ? ( ( req + page_size_b ) / page_size_b ) * page_size_b : req;
     }
     [[nodiscard]] constexpr size_type capacity_b ( ) const noexcept {
         constexpr std::size_t cap = Capacity * sizeof ( value_type );
-        return cap % detail::page_size_b ? ( ( cap + detail::page_size_b ) / detail::page_size_b ) * detail::page_size_b : cap;
+        return cap % page_size_b ? ( ( cap + page_size_b ) / page_size_b ) * page_size_b : cap;
     }
     [[nodiscard]] size_type size_b ( ) const noexcept {
         return reinterpret_cast<char *> ( m_end ) - reinterpret_cast<char *> ( m_begin );
     }
+
+    [[nodiscard]] static size_type grow ( size_type const & cap_b_ ) noexcept { return cap_b_ + page_size_b; }
+    [[nodiscard]] static size_type shrink ( size_type const & cap_b_ ) noexcept { return cap_b_ - page_size_b; }
 
     pointer m_begin, m_end;
     size_type m_committed_b;
