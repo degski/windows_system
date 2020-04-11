@@ -69,8 +69,8 @@ struct windows_system {
 
     using void_p = void *;
 
-    // 2'097'152 = 200MB = 2 ^ 21
-    //    65'536 =  64KB = 2 ^ 16
+    // 209'715'200 = 200MB = 2 ^ 21
+    //      65'536 =  64KB = 2 ^ 16
 
     ~windows_system ( ) noexcept ( false ) {
         if ( HEDLEY_LIKELY ( m_reserved_pointer ) ) {

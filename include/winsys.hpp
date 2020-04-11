@@ -50,7 +50,7 @@ inline SYSTEM_INFO get_system_information ( ) noexcept {
 
 inline SYSTEM_INFO const info = get_system_information ( );
 
-inline constexpr std::size_t page_size_b = 16ull * 65'536ull; // 100MB
+inline constexpr std::size_t page_size_b = 1'600ull * 65'536ull; // 100MB
 
 std::string last_error ( ) noexcept {
     std::string str{ '\0', 15 }; // SSO limit VS.
