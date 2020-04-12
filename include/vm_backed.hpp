@@ -227,6 +227,7 @@ struct vm_vector {
     [[maybe_unused]] reference emplace_back ( Args &&... value_ ) {
         if ( HEDLEY_UNLIKELY ( size_b ( ) == m_committed_b ) ) {
             size_type cib = std::min ( m_committed_b ? grow ( m_committed_b ) : allocation_page_size_b, capacity_b ( ) );
+            std::cout << ( cib / allocation_page_size_b * 100 ) << " MB" << nl;
             if ( HEDLEY_UNLIKELY ( not VirtualAlloc ( m_end, cib - m_committed_b, MEM_COMMIT, PAGE_READWRITE ) ) )
                 throw std::bad_alloc ( );
             m_committed_b = cib;
